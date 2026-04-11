@@ -56,7 +56,6 @@ class FicheRecolteLigne(models.Model):
     )
     recolteur_nom = models.CharField(max_length=120, blank=True)
     regime_type = models.CharField(max_length=10, choices=REGIME_CHOICES)
-    paye_amount = models.DecimalField(max_digits=12, decimal_places=2, default=0)
 
     def __str__(self):
         return f"{self.recolteur_nom or self.recolteur} - {self.regime_type}"

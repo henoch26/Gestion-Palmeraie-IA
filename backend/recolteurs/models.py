@@ -2,24 +2,13 @@ from django.db import models
 
 
 class Recolteur(models.Model):
-    # Recolteur: personne qui recolte dans un secteur
-    STATUT_CHOICES = [
-        ("Actif", "Actif"),
-        ("Inactif", "Inactif"),
-    ]
-
+    # Recolteur: personne qui recolte
+    code = models.CharField(max_length=20, unique=True)
     nom = models.CharField(max_length=120)
-    contact = models.CharField(max_length=50, blank=True)
-    statut = models.CharField(max_length=10, choices=STATUT_CHOICES, default="Actif")
-    # Lien optionnel vers un secteur (on garde nullable pour faciliter la saisie)
-    secteur = models.ForeignKey(
-        "secteurs.Secteur",
-        on_delete=models.SET_NULL,
-        null=True,
-        blank=True,
-        related_name="recolteurs",
-    )
+    lieu_residence = models.CharField(max_length=120)
     created_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):
+        if self.code:
+            return f"{self.code} - {self.nom}"
         return self.nom

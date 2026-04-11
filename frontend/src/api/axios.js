@@ -1,0 +1,41 @@
+import { getToken } from "../services/authService.js";
+
+// Base URL API (configurable via .env)
+const API_BASE = import.meta.env.VITE_API_URL || "http://127.0.0.1:8000/api";
+
+// Helper pour les requetes HTTP
+async function apiRequest(path, options = {}) {
+  const token = getToken();
+  const headers = {
+    "Content-Type": "application/json",
+    ...(options.headers || {}),
+  };
+
+  if (token) {
+    headers.Authorization = `Token ${token}`;
+  }
+
+  const res = await fetch(`${API_BASE}${path}`, {
+    ...options,
+    headers,
+  });
+
+  // 204: pas de contenu
+  if (res.status === 204) return null;
+
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    const message = data.detail || data.error || "Erreur API";
+    throw new Error(message);
+  }
+
+  return data;
+}
+
+export const apiGet = (path) => apiRequest(path);
+export const apiPost = (path, body) =>
+  apiRequest(path, { method: "POST", body: JSON.stringify(body) });
+export const apiPut = (path, body) =>
+  apiRequest(path, { method: "PUT", body: JSON.stringify(body) });
+export const apiDelete = (path) =>
+  apiRequest(path, { method: "DELETE" });

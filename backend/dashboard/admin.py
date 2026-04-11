@@ -1,3 +1,4 @@
 from django.contrib import admin
 
-# Register your models here.
+# Pas de model a administrer ici (dashboard = vues / agregations)
+

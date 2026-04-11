@@ -1,13 +1,11 @@
-import random
 from datetime import timedelta
+import random
 
 from django.core.management.base import BaseCommand
 from django.utils import timezone
 
 from secteurs.models import Secteur
 from recolteurs.models import Recolteur
-from ia.models import Anomalie
-from paiements.models import Paiement
 from recoltes.models import (
     FicheRecolte,
     SuperviseurAdjoint,
@@ -15,11 +13,10 @@ from recoltes.models import (
     FicheRecolteDetail,
     FicheRecuVente,
 )
-from ia.models import ParametreIA
 
 
 class Command(BaseCommand):
-    help = "Insere des donnees de depart (secteurs, recolteurs, paiements, anomalies, fiches)"
+    help = "Insere des donnees de depart (secteurs, recolteurs, fiches)"
 
     def handle(self, *args, **options):
         # Seed deterministe pour obtenir les memes donnees a chaque execution
@@ -27,42 +24,57 @@ class Command(BaseCommand):
 
         # 1) Secteurs (codes fixes)
         secteurs_data = [
-            {"code": "GP_1", "nom": "GP 1"},
-            {"code": "GP_2", "nom": "GP 2"},
-            {"code": "RTE_BOUB", "nom": "Rte Boub"},
-            {"code": "PM_1", "nom": "PM 1"},
-            {"code": "PM_2", "nom": "PM 2"},
-            {"code": "JC_1", "nom": "JC 1"},
-            {"code": "JC_2", "nom": "JC 2"},
-            {"code": "CO", "nom": "CO"},
-            {"code": "AA", "nom": "AA"},
+            {"code": "GP_1", "nom": "GP 1", "superficie_ha": 7.47, "relief": "Plateau", "sol": "Sableux / Argileux"},
+            {"code": "GP_2", "nom": "GP 2", "superficie_ha": 4.60, "relief": "Plateau / Pentus", "sol": "Argileux / Gravillonnaire"},
+            {"code": "RTE_BOUB", "nom": "Rte Boub", "superficie_ha": 1.90, "relief": "Plateau", "sol": "Argileux"},
+            {"code": "PM_1", "nom": "PM 1", "superficie_ha": 3.48, "relief": "Plateau / Pentus", "sol": "Gravillonnaire / Argileux / Sableux"},
+            {"code": "PM_2", "nom": "PM 2", "superficie_ha": 4.44, "relief": "Pentus - Plateau", "sol": "Humifere - Argileux"},
+            {"code": "JC_1", "nom": "JC 1", "superficie_ha": 6.80, "relief": "Pentus - Plateau", "sol": "Sableux - Humifere"},
+            {"code": "JC_2", "nom": "JC 2", "superficie_ha": 1.17, "relief": "Plateau", "sol": "Sableux"},
+            {"code": "CO", "nom": "CO", "superficie_ha": 2.07, "relief": "Plateau", "sol": "Argileux - Gravillonnaire"},
+            {"code": "AA", "nom": "AA", "superficie_ha": 2.67, "relief": "Plateau", "sol": "Sableux - Argileux"},
         ]
 
         for s in secteurs_data:
-            Secteur.objects.get_or_create(
-                code=s["code"], defaults={"nom": s["nom"], "responsable": "", "actif": True}
+            secteur, created = Secteur.objects.get_or_create(
+                code=s["code"],
+                defaults={
+                    "nom": s["nom"],
+                    "superficie_ha": s["superficie_ha"],
+                    "situation_relief": s.get("relief", ""),
+                    "type_sol": s.get("sol", ""),
+                },
             )
+            # Si le secteur existe deja sans infos, on complete
+            if not created and (secteur.superficie_ha is None or secteur.superficie_ha == 0):
+                secteur.superficie_ha = s["superficie_ha"]
+                secteur.save(update_fields=["superficie_ha"])
+            if not created and not (secteur.situation_relief or "").strip() and s.get("relief"):
+                secteur.situation_relief = s["relief"]
+                secteur.save(update_fields=["situation_relief"])
+            if not created and not (secteur.type_sol or "").strip() and s.get("sol"):
+                secteur.type_sol = s["sol"]
+                secteur.save(update_fields=["type_sol"])
 
         secteurs = list(Secteur.objects.all())
         self.stdout.write(self.style.SUCCESS("Secteurs: OK"))
 
         # 2) Recolteurs (on garantit un minimum)
         recolteurs_base = [
-            {"nom": "A. Konan", "statut": "Actif"},
-            {"nom": "J. Nguessan", "statut": "Actif"},
-            {"nom": "B. Ouattara", "statut": "Inactif"},
-            {"nom": "K. Kouadio", "statut": "Actif"},
-            {"nom": "S. Traore", "statut": "Actif"},
-            {"nom": "P. Yao", "statut": "Actif"},
+            {"nom": "A. Konan", "code": "REC-001", "lieu_residence": "Grand-Palmeraie"},
+            {"nom": "J. Nguessan", "code": "REC-002", "lieu_residence": "Boubou"},
+            {"nom": "B. Ouattara", "code": "REC-003", "lieu_residence": "Plateau"},
+            {"nom": "K. Kouadio", "code": "REC-004", "lieu_residence": "PM"},
+            {"nom": "S. Traore", "code": "REC-005", "lieu_residence": "JC"},
+            {"nom": "P. Yao", "code": "REC-006", "lieu_residence": "AA"},
         ]
 
         for r in recolteurs_base:
             Recolteur.objects.get_or_create(
-                nom=r["nom"],
+                code=r["code"],
                 defaults={
-                    "secteur": random.choice(secteurs),
-                    "statut": r["statut"],
-                    "contact": "07 11 22 33 44",
+                    "nom": r["nom"],
+                    "lieu_residence": r.get("lieu_residence", "N/A"),
                 },
             )
 
@@ -72,75 +84,17 @@ class Command(BaseCommand):
         if len(recolteurs) < target_recolteurs:
             missing = target_recolteurs - len(recolteurs)
             for i in range(missing):
+                index = len(recolteurs) + i + 1
                 Recolteur.objects.create(
-                    nom=f"Recolteur {len(recolteurs) + i + 1}",
-                    secteur=random.choice(secteurs),
-                    statut="Actif",
-                    contact=f"07 {random.randint(10,99)} {random.randint(10,99)} "
-                            f"{random.randint(10,99)} {random.randint(10,99)}",
+                    code=f"REC-{index:03d}",
+                    nom=f"Recolteur {index}",
+                    lieu_residence=random.choice(["GP", "PM", "JC", "CO", "AA"]),
                 )
 
         recolteurs = list(Recolteur.objects.all())
         self.stdout.write(self.style.SUCCESS("Recolteurs: OK"))
 
-        # 3) Anomalies (on ajoute un petit stock si besoin)
-        target_anomalies = 10
-        if Anomalie.objects.count() < target_anomalies:
-            types = ["Baisse rendement", "Retard recolte", "Panne machine", "Pluie forte"]
-            niveaux = ["Faible", "Moyen", "Eleve"]
-            for i in range(target_anomalies - Anomalie.objects.count()):
-                Anomalie.objects.create(
-                    date=timezone.now().date() - timedelta(days=random.randint(0, 60)),
-                    type=random.choice(types),
-                    zone=f"Secteur {random.choice(['A', 'B', 'C', 'D'])}",
-                    niveau=random.choice(niveaux),
-                    description=f"Anomalie detectee #{i+1}",
-                )
-        self.stdout.write(self.style.SUCCESS("Anomalies: OK"))
-
-        # 4) Paiements (avec periodes mois / trimestre / semestre / annee)
-        target_paiements = 100
-        existing_paiements = Paiement.objects.count()
-        if existing_paiements < target_paiements:
-            # Liste de periodes variees
-            months = [
-                "Janvier", "Fevrier", "Mars", "Avril", "Mai", "Juin",
-                "Juillet", "Aout", "Septembre", "Octobre", "Novembre", "Decembre",
-            ]
-            years = [2024, 2025, 2026]
-            periodes = []
-            for y in years:
-                periodes.extend([f"{m} {y}" for m in months])
-                periodes.extend([f"T{t} {y}" for t in range(1, 5)])
-                periodes.extend([f"S{s} {y}" for s in range(1, 3)])
-                periodes.append(f"Annee {y}")
-
-            statuts = ["Paye", "En attente", "En retard", "Annule"]
-
-            for i in range(target_paiements - existing_paiements):
-                rec = random.choice(recolteurs)
-                date = timezone.now().date() - timedelta(days=random.randint(1, 420))
-                brut = random.randint(60000, 220000)
-                bonus = random.choice([0, 2000, 5000, 10000])
-                penalite = random.choice([0, 0, 2000, 5000])
-                net = brut + bonus - penalite
-
-                Paiement.objects.create(
-                    date=date,
-                    recolteur=rec,
-                    secteur=rec.secteur,
-                    periode=random.choice(periodes),
-                    brut=brut,
-                    bonus=bonus,
-                    penalite=penalite,
-                    net=net,
-                    statut=random.choice(statuts),
-                    reference=f"TX-{date.year}-{existing_paiements + i + 1:05d}",
-                    commentaire="Generation automatique",
-                )
-        self.stdout.write(self.style.SUCCESS("Paiements: OK"))
-
-        # 5) Fiches de recolte (100 fiches)
+        # 3) Fiches de recolte (100 fiches)
         target_fiches = 100
         existing_fiches = FicheRecolte.objects.count()
         if existing_fiches < target_fiches:
@@ -148,22 +102,13 @@ class Command(BaseCommand):
             superviseurs = ["S. Traore", "K. Kouassi", "A. Bamba", "I. Kouadio"]
             adjoints = ["P. Yao", "M. N'Guessan", "L. Koffi", "D. Konan"]
 
-            # Helper: cree une ligne + details et calcule PAYE
+            # Helper: cree une ligne + details
             def create_line(fiche, rec, regime_type, details):
-                rates = {
-                    "grands": fiche.bareme_grands,
-                    "moyens": fiche.bareme_moyens,
-                    "petits": fiche.bareme_petits,
-                }
-                total = sum(d["quantite"] for d in details)
-                paye_amount = total * rates.get(regime_type, 0)
-
                 line = FicheRecolteLigne.objects.create(
                     fiche=fiche,
                     recolteur=rec,
                     recolteur_nom=rec.nom,
                     regime_type=regime_type,
-                    paye_amount=paye_amount,
                 )
 
                 for det in details:
@@ -220,24 +165,5 @@ class Command(BaseCommand):
                 )
 
             self.stdout.write(self.style.SUCCESS("Fiches recolte: OK"))
-
-        # 6) Parametres IA (historique de base)
-        if ParametreIA.objects.count() < 12:
-            today = timezone.now().date().replace(day=1)
-            for i in range(12):
-                ParametreIA.objects.create(
-                    date=today - timedelta(days=30 * i),
-                    frequency="month",
-                    secteur=None,
-                    rainfall_mm=random.randint(150, 280),
-                    temperature_c=random.randint(24, 30),
-                    workforce_count=random.randint(80, 140),
-                    fertilizer_kg_ha=random.randint(60, 110),
-                    maintenance_index=random.randint(60, 90),
-                    nonconformity_pct=random.randint(1, 6),
-                    active_area_ha=100,
-                    note="Parametres generes",
-                )
-            self.stdout.write(self.style.SUCCESS("Parametres IA: OK"))
 
         self.stdout.write(self.style.SUCCESS("Seed termine."))

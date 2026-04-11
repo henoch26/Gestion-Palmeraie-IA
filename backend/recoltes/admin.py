@@ -22,7 +22,7 @@ class SuperviseurAdjointAdmin(admin.ModelAdmin):
 
 @admin.register(FicheRecolteLigne)
 class FicheRecolteLigneAdmin(admin.ModelAdmin):
-    list_display = ("id", "fiche", "recolteur_nom", "regime_type", "paye_amount")
+    list_display = ("id", "fiche", "recolteur_nom", "regime_type")
     list_filter = ("regime_type",)
 
 

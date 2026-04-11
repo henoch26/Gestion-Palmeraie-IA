@@ -26,7 +26,8 @@ class FicheRecolteDetailSerializer(serializers.ModelSerializer):
 class FicheRecolteLigneSerializer(serializers.ModelSerializer):
     details = FicheRecolteDetailSerializer(many=True)
     recolteur_nom_display = serializers.CharField(source="recolteur.nom", read_only=True)
-    paye_amount = serializers.DecimalField(max_digits=12, decimal_places=2, read_only=True)
+    total_regimes = serializers.SerializerMethodField()
+    prix_fcfa = serializers.SerializerMethodField()
 
     class Meta:
         model = FicheRecolteLigne
@@ -36,9 +37,28 @@ class FicheRecolteLigneSerializer(serializers.ModelSerializer):
             "recolteur_nom",
             "recolteur_nom_display",
             "regime_type",
-            "paye_amount",
+            "total_regimes",
+            "prix_fcfa",
             "details",
         ]
+
+    def get_total_regimes(self, obj):
+        # Somme des quantites par ligne
+        return sum(int(d.quantite or 0) for d in obj.details.all())
+
+    def get_prix_fcfa(self, obj):
+        # Prix calcule: total regimes * bareme du jour (fiche)
+        total = self.get_total_regimes(obj)
+        fiche = getattr(obj, "fiche", None)
+        if not fiche:
+            return 0
+
+        rates = {
+            "grands": int(getattr(fiche, "bareme_grands", 0) or 0),
+            "moyens": int(getattr(fiche, "bareme_moyens", 0) or 0),
+            "petits": int(getattr(fiche, "bareme_petits", 0) or 0),
+        }
+        return int(total) * int(rates.get(obj.regime_type, 0) or 0)
 
     def validate(self, attrs):
         # Au moins un identifiant de recolteur
@@ -62,23 +82,11 @@ class FicheRecolteSerializer(serializers.ModelSerializer):
         model = FicheRecolte
         fields = "__all__"
 
-    def _compute_paye_amount(self, regime_type, details, bareme):
-        # Calcule PAYE = total regimes * bareme
-        total = sum(int(d.get("quantite") or 0) for d in details)
-        rate = bareme.get(regime_type, 0)
-        return total * rate
-
     @transaction.atomic
     def create(self, validated_data):
         superviseurs_data = validated_data.pop("superviseurs_adjoints", [])
         lignes_data = validated_data.pop("lignes", [])
         recus_data = validated_data.pop("recus", [])
-
-        bareme = {
-            "grands": validated_data.get("bareme_grands", 0),
-            "moyens": validated_data.get("bareme_moyens", 0),
-            "petits": validated_data.get("bareme_petits", 0),
-        }
 
         fiche = FicheRecolte.objects.create(**validated_data)
 
@@ -94,10 +102,6 @@ class FicheRecolteSerializer(serializers.ModelSerializer):
             recolteur = ligne.get("recolteur")
             if recolteur and not ligne.get("recolteur_nom"):
                 ligne["recolteur_nom"] = recolteur.nom
-
-            # PAYE calcule automatiquement (on ignore toute valeur envoyee)
-            regime_type = ligne.get("regime_type")
-            ligne["paye_amount"] = self._compute_paye_amount(regime_type, details, bareme)
 
             line = FicheRecolteLigne.objects.create(fiche=fiche, **ligne)
             for det in details:
@@ -123,12 +127,6 @@ class FicheRecolteSerializer(serializers.ModelSerializer):
             setattr(instance, attr, value)
         instance.save()
 
-        bareme = {
-            "grands": instance.bareme_grands,
-            "moyens": instance.bareme_moyens,
-            "petits": instance.bareme_petits,
-        }
-
         # Remplacement complet des listes si fournies
         if superviseurs_data is not None:
             instance.superviseurs_adjoints.all().delete()
@@ -142,8 +140,6 @@ class FicheRecolteSerializer(serializers.ModelSerializer):
                 recolteur = ligne.get("recolteur")
                 if recolteur and not ligne.get("recolteur_nom"):
                     ligne["recolteur_nom"] = recolteur.nom
-                regime_type = ligne.get("regime_type")
-                ligne["paye_amount"] = self._compute_paye_amount(regime_type, details, bareme)
                 line = FicheRecolteLigne.objects.create(fiche=instance, **ligne)
                 for det in details:
                     secteur = det.get("secteur")

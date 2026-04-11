@@ -4,5 +4,5 @@ from .models import Recolteur
 
 @admin.register(Recolteur)
 class RecolteurAdmin(admin.ModelAdmin):
-    list_display = ("id", "nom", "statut", "secteur", "contact", "created_at")
-    search_fields = ("nom", "contact")
+    list_display = ("id", "code", "nom", "lieu_residence", "created_at")
+    search_fields = ("code", "nom", "lieu_residence")

@@ -40,14 +40,13 @@ INSTALLED_APPS = [
     'rest_framework',
     'rest_framework.authtoken',
     'corsheaders',
-    'ia',
     'dashboard',
-    'paiements',
     'recoltes',
     'secteurs',
-    'ventes',
     'accounts',
     'recolteurs',
+    'travaux',
+    'materiels',
 
 ]
 
