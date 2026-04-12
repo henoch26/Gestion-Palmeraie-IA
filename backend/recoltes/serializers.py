@@ -68,6 +68,31 @@ class FicheRecolteLigneSerializer(serializers.ModelSerializer):
 
 
 class FicheRecuVenteSerializer(serializers.ModelSerializer):
+    def validate(self, attrs):
+        # Si un recu est saisi, on exige au minimum: date + montant
+        # (un recu totalement vide est ignore au moment de la creation/update).
+        d = attrs.get("date")
+        client = (attrs.get("client") or "").strip()
+        pesee = attrs.get("pesee_kg") or 0
+        non_conf = attrs.get("non_conformes_pct") or 0
+        montant = attrs.get("montant") or 0
+
+        is_empty = (
+            (not d)
+            and (not client)
+            and float(pesee or 0) == 0.0
+            and float(non_conf or 0) == 0.0
+            and float(montant or 0) == 0.0
+        )
+        if is_empty:
+            return attrs
+
+        if not d:
+            raise serializers.ValidationError({"date": "Date requise"})
+        if float(montant or 0) <= 0.0:
+            raise serializers.ValidationError({"montant": "Montant requis"})
+        return attrs
+
     class Meta:
         model = FicheRecuVente
         fields = ["id", "date", "client", "pesee_kg", "non_conformes_pct", "montant"]
@@ -81,6 +106,40 @@ class FicheRecolteSerializer(serializers.ModelSerializer):
     class Meta:
         model = FicheRecolte
         fields = "__all__"
+
+    def validate(self, attrs):
+        # Champs indispensables
+        if not (attrs.get("superviseur_general") or "").strip():
+            raise serializers.ValidationError(
+                {"superviseur_general": "Superviseur general requis"}
+            )
+
+        lignes = attrs.get("lignes") or []
+        if not lignes:
+            raise serializers.ValidationError(
+                {"lignes": "Au moins une recolte (quantite > 0) est requise"}
+            )
+
+        has_any_qty = False
+        for ligne in lignes:
+            for det in (ligne.get("details") or []):
+                q = det.get("quantite") or 0
+                try:
+                    qv = int(q)
+                except Exception:
+                    qv = 0
+                if qv > 0:
+                    has_any_qty = True
+                    break
+            if has_any_qty:
+                break
+
+        if not has_any_qty:
+            raise serializers.ValidationError(
+                {"lignes": "Saisis au moins une quantite > 0"}
+            )
+
+        return attrs
 
     @transaction.atomic
     def create(self, validated_data):
@@ -97,6 +156,10 @@ class FicheRecolteSerializer(serializers.ModelSerializer):
         # Lignes + details
         for ligne in lignes_data:
             details = ligne.pop("details", [])
+            # On garde uniquement les details avec une quantite > 0
+            details = [d for d in details if int(d.get("quantite") or 0) > 0]
+            if not details:
+                continue
 
             # Snapshot du nom si recolteur existe
             recolteur = ligne.get("recolteur")
@@ -112,6 +175,20 @@ class FicheRecolteSerializer(serializers.ModelSerializer):
 
         # Recus de vente
         for recu in recus_data:
+            d = recu.get("date")
+            client = (recu.get("client") or "").strip()
+            pesee = recu.get("pesee_kg") or 0
+            non_conf = recu.get("non_conformes_pct") or 0
+            montant = recu.get("montant") or 0
+            is_empty = (
+                (not d)
+                and (not client)
+                and float(pesee or 0) == 0.0
+                and float(non_conf or 0) == 0.0
+                and float(montant or 0) == 0.0
+            )
+            if is_empty:
+                continue
             FicheRecuVente.objects.create(fiche=fiche, **recu)
 
         return fiche
@@ -137,6 +214,9 @@ class FicheRecolteSerializer(serializers.ModelSerializer):
             instance.lignes.all().delete()
             for ligne in lignes_data:
                 details = ligne.pop("details", [])
+                details = [d for d in details if int(d.get("quantite") or 0) > 0]
+                if not details:
+                    continue
                 recolteur = ligne.get("recolteur")
                 if recolteur and not ligne.get("recolteur_nom"):
                     ligne["recolteur_nom"] = recolteur.nom
@@ -150,6 +230,20 @@ class FicheRecolteSerializer(serializers.ModelSerializer):
         if recus_data is not None:
             instance.recus.all().delete()
             for recu in recus_data:
+                d = recu.get("date")
+                client = (recu.get("client") or "").strip()
+                pesee = recu.get("pesee_kg") or 0
+                non_conf = recu.get("non_conformes_pct") or 0
+                montant = recu.get("montant") or 0
+                is_empty = (
+                    (not d)
+                    and (not client)
+                    and float(pesee or 0) == 0.0
+                    and float(non_conf or 0) == 0.0
+                    and float(montant or 0) == 0.0
+                )
+                if is_empty:
+                    continue
                 FicheRecuVente.objects.create(fiche=instance, **recu)
 
         return instance

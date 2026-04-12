@@ -3,6 +3,7 @@ from .models import Secteur
 
 
 class SecteurSerializer(serializers.ModelSerializer):
+    code = serializers.CharField(read_only=True)
     superficie_ha = serializers.DecimalField(
         max_digits=8, decimal_places=2, required=True, allow_null=False
     )
@@ -13,6 +14,21 @@ class SecteurSerializer(serializers.ModelSerializer):
     class Meta:
         model = Secteur
         fields = "__all__"
+
+    def validate(self, attrs):
+        # Eviter les doublons de secteurs par nom (cas typique: "GP 1" deja existant)
+        raw_nom = (attrs.get("nom") or "")
+        nom = " ".join(str(raw_nom).split()).strip()
+        if nom:
+            attrs["nom"] = nom
+            qs = Secteur.objects.filter(nom__iexact=nom)
+            if self.instance:
+                qs = qs.exclude(pk=self.instance.pk)
+            if qs.exists():
+                raise serializers.ValidationError(
+                    {"nom": "Ce secteur existe deja. Utilisez Modifier dans la liste des secteurs."}
+                )
+        return attrs
 
     def get_rendement_ha(self, obj):
         # Rendement simple: regimes / ha (sur toute la production disponible dans le queryset annote)
