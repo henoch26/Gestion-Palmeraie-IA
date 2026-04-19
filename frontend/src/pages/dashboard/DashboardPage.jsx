@@ -3,7 +3,9 @@ import { useNavigate } from "react-router-dom";
 import ChartCard from "../../components/ChartCard.jsx";
 import ChartDialog from "../../components/ChartDialog.jsx";
 import DataTable from "../../components/DataTable.jsx";
+import LogoLoader from "../../components/LogoLoader.jsx";
 import { useToast } from "../../context/ToastContext.jsx";
+import SearchableSelect from "../../components/SearchableSelect.jsx";
 import { getDashboardSummary } from "../../services/dashboardService.js";
 import { listRecolteurs } from "../../services/recolteurService.js";
 import { listSecteurs } from "../../services/secteurService.js";
@@ -533,6 +535,9 @@ export default function DashboardPage() {
     ];
   }, [summary]);
 
+  const primaryStats = useMemo(() => statsCards.slice(0, 4), [statsCards]);
+  const secondaryStats = useMemo(() => statsCards.slice(4), [statsCards]);
+
   return (
     <div className="page dashboard">
       <div className="page-header-row">
@@ -587,14 +592,16 @@ export default function DashboardPage() {
 
             <label>
               Recolteur
-              <select value={recolteur} onChange={(e) => setRecolteur(e.target.value)}>
-                <option value="">Tous</option>
-                {recolteurs.map((r) => (
-                  <option key={r.id} value={r.id}>
-                    {r.nom}
-                  </option>
-                ))}
-              </select>
+              <SearchableSelect
+                value={recolteur}
+                onChange={(v) => setRecolteur(String(v || ""))}
+                options={(recolteurs || []).map((r) => ({
+                  value: String(r.id),
+                  label: `${r.code ? `${r.code} - ` : ""}${r.nom}`,
+                }))}
+                placeholder="Tous"
+                clearable
+              />
             </label>
 
             <label>
@@ -646,7 +653,7 @@ export default function DashboardPage() {
       </div>
 
       <section className="stats-grid" aria-busy={loading ? "true" : "false"}>
-        {statsCards.map((s) => (
+        {primaryStats.map((s) => (
           <article key={s.title} className="stat-card">
             <h3>{s.title}</h3>
             <p>{loading ? "..." : s.value}</p>
@@ -654,8 +661,22 @@ export default function DashboardPage() {
         ))}
       </section>
 
+      {secondaryStats.length > 0 && (
+        <details className="kpi-details">
+          <summary>Autres indicateurs</summary>
+          <div className="kpi-mini-grid">
+            {secondaryStats.map((s) => (
+              <article key={s.title} className="stat-card">
+                <h3>{s.title}</h3>
+                <p>{loading ? "..." : s.value}</p>
+              </article>
+            ))}
+          </div>
+        </details>
+      )}
+
       {loading ? (
-        <p>Chargement...</p>
+        <LogoLoader label="Chargement du dashboard..." />
       ) : (
         <>
           {tab === "overview" && (
@@ -755,6 +776,7 @@ export default function DashboardPage() {
                   ]}
                   rows={summary?.lists?.secteurs || []}
                   pageSize={5}
+                  minWidth={0}
                 />
               </article>
 
@@ -772,6 +794,7 @@ export default function DashboardPage() {
                   ]}
                   rows={summary?.lists?.recoltes || []}
                   pageSize={5}
+                  minWidth={0}
                 />
               </article>
 
@@ -789,6 +812,7 @@ export default function DashboardPage() {
                   ]}
                   rows={summary?.lists?.travaux || []}
                   pageSize={5}
+                  minWidth={0}
                 />
               </article>
 
@@ -802,6 +826,7 @@ export default function DashboardPage() {
                   ]}
                   rows={summary?.lists?.recus_vente || []}
                   pageSize={5}
+                  minWidth={0}
                 />
               </article>
 
@@ -820,6 +845,7 @@ export default function DashboardPage() {
                   ]}
                   rows={summary?.lists?.materiels || []}
                   pageSize={5}
+                  minWidth={0}
                 />
               </article>
             </section>

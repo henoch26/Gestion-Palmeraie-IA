@@ -1,10 +1,11 @@
 import { useEffect, useState } from "react";
+import useBodyScrollLock from "../utils/useBodyScrollLock.js";
 
 // Dialog pour ajouter / modifier un recolteur
 export default function RecolteurDialog({ open, onClose, onSubmit, initial }) {
+  useBodyScrollLock(!!open);
   // Etat local du formulaire
   const [form, setForm] = useState({
-    code: "",
     nom: "",
     lieu_residence: "",
   });
@@ -18,12 +19,10 @@ export default function RecolteurDialog({ open, onClose, onSubmit, initial }) {
       setForm(
         initial
           ? {
-              code: initial.code || "",
               nom: initial.nom || "",
               lieu_residence: initial.lieu_residence || "",
             }
           : {
-              code: "",
               nom: "",
               lieu_residence: "",
             }
@@ -45,7 +44,6 @@ export default function RecolteurDialog({ open, onClose, onSubmit, initial }) {
 
     const nextErrors = {};
     if (!form.nom.trim()) nextErrors.nom = "Nom requis";
-    if (!form.code.trim()) nextErrors.code = "Code requis";
     if (!form.lieu_residence.trim()) nextErrors.lieu_residence = "Lieu requis";
 
     if (Object.keys(nextErrors).length > 0) {
@@ -63,16 +61,10 @@ export default function RecolteurDialog({ open, onClose, onSubmit, initial }) {
         <h3>{initial ? "Modifier recolteur" : "Ajouter recolteur"}</h3>
 
         <form className="form-grid" onSubmit={handleSubmit}>
-          <label>
-            Code
-            <input
-              name="code"
-              value={form.code}
-              onChange={handleChange}
-              className={errors.code ? "input-error" : ""}
-            />
-            {errors.code && <span className="field-error">{errors.code}</span>}
-          </label>
+          <div className="form-hint">
+            <strong>Code :</strong>{" "}
+            {initial?.code ? initial.code : "Genere automatiquement"}
+          </div>
 
           <label>
             Nom

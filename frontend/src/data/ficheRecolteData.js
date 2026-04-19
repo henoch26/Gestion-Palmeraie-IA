@@ -56,10 +56,9 @@ export const ficheRecolteInitial = {
     nourriture: "",
     transport: "",
   },
-  // Recus de vente (la fiche en montre 2)
+  // Recu de vente (1 par defaut, on peut en ajouter d'autres si besoin)
   recus: [
     { id: "RC-001", date: "", client: "", peseeKg: "", nonConformes: "", montant: "" },
-    { id: "RC-002", date: "", client: "", peseeKg: "", nonConformes: "", montant: "" },
   ],
   observations: "",
 };

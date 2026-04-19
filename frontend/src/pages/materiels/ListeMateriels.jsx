@@ -1,7 +1,9 @@
 import { useEffect, useState } from "react";
 import DataTable from "../../components/DataTable.jsx";
+import LogoLoader from "../../components/LogoLoader.jsx";
 import ConfirmDialog from "../../components/ConfirmDialog.jsx";
 import MaterielDialog from "../../components/MaterielDialog.jsx";
+import SuccessDialog from "../../components/SuccessDialog.jsx";
 import { useToast } from "../../context/ToastContext.jsx";
 import {
   createMateriel,
@@ -19,6 +21,7 @@ export default function ListeMateriels() {
   const [openForm, setOpenForm] = useState(false);
   const [editing, setEditing] = useState(null);
   const [toDelete, setToDelete] = useState(null);
+  const [success, setSuccess] = useState({ open: false, message: "" });
 
   const columns = [
     { key: "numero", label: "N°" },
@@ -46,7 +49,7 @@ export default function ListeMateriels() {
       const data = await listMateriels();
       setRows(data || []);
     } catch (err) {
-      pushToast({ type: "error", title: "Erreur API", message: err.message });
+      pushToast({ type: "error", title: "Materiels", message: err.message });
     } finally {
       setLoading(false);
     }
@@ -65,15 +68,15 @@ export default function ListeMateriels() {
     try {
       if (editing) {
         await updateMateriel(editing.id, payload);
-        pushToast({ type: "success", title: "Materiel modifie" });
+        setSuccess({ open: true, message: "Materiel modifie avec succes" });
       } else {
         await createMateriel(payload);
-        pushToast({ type: "success", title: "Materiel ajoute" });
+        setSuccess({ open: true, message: "Materiel ajoute avec succes" });
       }
       setOpenForm(false);
       load();
     } catch (err) {
-      pushToast({ type: "error", title: "Erreur API", message: err.message });
+      pushToast({ type: "error", title: "Materiels", message: err.message });
     }
   };
 
@@ -84,7 +87,7 @@ export default function ListeMateriels() {
       setToDelete(null);
       load();
     } catch (err) {
-      pushToast({ type: "error", title: "Erreur API", message: err.message });
+      pushToast({ type: "error", title: "Materiels", message: err.message });
     }
   };
 
@@ -95,7 +98,7 @@ export default function ListeMateriels() {
         <button className="btn-primary" onClick={handleAdd}>Ajouter</button>
       </div>
 
-      {loading ? <p>Chargement...</p> : <DataTable columns={columns} rows={rows} pageSize={8} />}
+      {loading ? <LogoLoader /> : <DataTable columns={columns} rows={rows} pageSize={8} />}
 
       <MaterielDialog
         open={openForm}
@@ -112,7 +115,12 @@ export default function ListeMateriels() {
         onConfirm={handleDelete}
         confirmLabel="Supprimer"
       />
+
+      <SuccessDialog
+        open={success.open}
+        message={success.message}
+        onClose={() => setSuccess({ open: false, message: "" })}
+      />
     </div>
   );
 }
-

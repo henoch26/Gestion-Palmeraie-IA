@@ -1,8 +1,10 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import DataTable from "../../components/DataTable.jsx";
+import LogoLoader from "../../components/LogoLoader.jsx";
 import ConfirmDialog from "../../components/ConfirmDialog.jsx";
 import SecteurDialog from "../../components/SecteurDialog.jsx";
+import SuccessDialog from "../../components/SuccessDialog.jsx";
 import { useToast } from "../../context/ToastContext.jsx";
 import { createSecteur, deleteSecteur, listSecteurs, updateSecteur } from "../../services/secteurService.js";
 import { getToken } from "../../services/authService.js";
@@ -20,6 +22,7 @@ export default function ListeSecteurs() {
   const [editing, setEditing] = useState(null);
   const [openForm, setOpenForm] = useState(false);
   const [toDelete, setToDelete] = useState(null);
+  const [success, setSuccess] = useState({ open: false, message: "" });
 
   const columns = [
     { key: "code", label: "Code" },
@@ -50,7 +53,7 @@ export default function ListeSecteurs() {
       const data = await listSecteurs();
       setRows(data);
     } catch (err) {
-      pushToast({ type: "error", title: "Erreur API", message: err.message });
+      pushToast({ type: "error", title: "Secteurs", message: err.message });
     } finally {
       setLoading(false);
     }
@@ -90,15 +93,15 @@ export default function ListeSecteurs() {
     try {
       if (editing) {
         await updateSecteur(editing.id, form);
-        pushToast({ type: "success", title: "Secteur modifie", message: form.nom });
+        setSuccess({ open: true, message: "Secteur modifie avec succes" });
       } else {
         await createSecteur(form);
-        pushToast({ type: "success", title: "Secteur ajoute", message: form.nom });
+        setSuccess({ open: true, message: "Secteur ajoute avec succes" });
       }
       setOpenForm(false);
       load();
     } catch (err) {
-      pushToast({ type: "error", title: "Erreur API", message: err.message });
+      pushToast({ type: "error", title: "Secteurs", message: err.message });
     }
   };
 
@@ -110,7 +113,7 @@ export default function ListeSecteurs() {
       setToDelete(null);
       load();
     } catch (err) {
-      pushToast({ type: "error", title: "Erreur API", message: err.message });
+      pushToast({ type: "error", title: "Secteurs", message: err.message });
     }
   };
 
@@ -124,12 +127,11 @@ export default function ListeSecteurs() {
         </div>
       </div>
 
-      {loading ? <p>Chargement...</p> : <DataTable columns={columns} rows={rows} pageSize={5} />}
+      {loading ? <LogoLoader /> : <DataTable columns={columns} rows={rows} pageSize={5} />}
 
       <SecteurDialog
         open={openForm}
         initial={editing}
-        existingCodes={rows.map((r) => r.code)}
         onClose={() => setOpenForm(false)}
         onSubmit={handleSubmit}
       />
@@ -141,6 +143,12 @@ export default function ListeSecteurs() {
         onCancel={() => setToDelete(null)}
         onConfirm={handleDelete}
         confirmLabel="Supprimer"
+      />
+
+      <SuccessDialog
+        open={success.open}
+        message={success.message}
+        onClose={() => setSuccess({ open: false, message: "" })}
       />
     </div>
   );

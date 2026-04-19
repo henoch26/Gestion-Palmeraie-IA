@@ -1,5 +1,6 @@
 import { Navigate, Outlet, useLocation } from "react-router-dom";
 import { useAuth } from "../context/AuthContext.jsx";
+import LogoLoader from "../components/LogoLoader.jsx";
 
 // Route protegee: redirige vers /login si non connecte
 export default function ProtectedRoute() {
@@ -9,7 +10,7 @@ export default function ProtectedRoute() {
   if (loading) {
     return (
       <div className="page">
-        <p>Chargement...</p>
+        <LogoLoader />
       </div>
     );
   }

@@ -1,5 +1,8 @@
+import useBodyScrollLock from "../utils/useBodyScrollLock.js";
+
 // Dialog pour afficher les details d'une fiche de recolte
 export default function FicheDialog({ open, onClose, fiche }) {
+  useBodyScrollLock(!!open);
   if (!open || !fiche) return null;
 
   // Helpers pour formater les donnees

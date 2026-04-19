@@ -1,7 +1,9 @@
 import { useEffect, useState } from "react";
+import useBodyScrollLock from "../utils/useBodyScrollLock.js";
 
 // Dialog pour ajouter / modifier une recolte
 export default function RecolteDialog({ open, onClose, onSubmit, initial }) {
+  useBodyScrollLock(!!open);
   // Etat local du formulaire
   const [form, setForm] = useState({
     date: "",

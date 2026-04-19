@@ -1,7 +1,9 @@
 import { useEffect, useState } from "react";
 import { sanitizeInt } from "../utils/number.js";
+import useBodyScrollLock from "../utils/useBodyScrollLock.js";
 
 export default function MaterielDialog({ open, onClose, onSubmit, initial }) {
+  useBodyScrollLock(!!open);
   const [form, setForm] = useState({
     numero: "",
     designation: "",
@@ -128,4 +130,3 @@ export default function MaterielDialog({ open, onClose, onSubmit, initial }) {
     </div>
   );
 }
-

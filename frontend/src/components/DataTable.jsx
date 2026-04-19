@@ -1,7 +1,12 @@
 import { useEffect, useMemo, useState } from "react";
 
 // Reusable table with search, sort, and pagination
-export default function DataTable({ columns = [], rows = [], pageSize = 5 }) {
+export default function DataTable({
+  columns = [],
+  rows = [],
+  pageSize = 5,
+  minWidth = 720, // px; set to 0 to disable horizontal overflow for small tables
+}) {
   // Search query
   const [query, setQuery] = useState("");
 
@@ -71,7 +76,7 @@ export default function DataTable({ columns = [], rows = [], pageSize = 5 }) {
 
       {/* Table avec scroll horizontal si besoin */}
       <div className="table-scroll">
-        <table className="data-table">
+        <table className="data-table" style={{ minWidth }}>
           <thead>
             <tr>
               {columns.map((c) => (

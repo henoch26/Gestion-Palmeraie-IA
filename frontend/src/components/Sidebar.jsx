@@ -1,8 +1,9 @@
 import { NavLink, useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext.jsx";
+import logo from "../assets/logo.png";
 
 // Barre de navigation en haut pour gagner de l'espace
-export default function Sidebar() {
+export default function Sidebar({ isNavigating = false }) {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
 
@@ -14,7 +15,12 @@ export default function Sidebar() {
   return (
     <header className="topbar">
       {/* Logo / titre */}
-      <div className="topbar-brand">Palmeraie</div>
+      <div className="topbar-brand">
+        <span className={`topbar-logo-wrap ${isNavigating ? "is-loading" : ""}`} aria-hidden="true">
+          <img className="topbar-logo" src={logo} alt="" />
+        </span>
+        <span>Palmeraie</span>
+      </div>
 
       {/* Navigation principale */}
       <nav className="topbar-nav">

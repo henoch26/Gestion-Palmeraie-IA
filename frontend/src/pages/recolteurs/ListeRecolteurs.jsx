@@ -1,8 +1,10 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import DataTable from "../../components/DataTable.jsx";
+import LogoLoader from "../../components/LogoLoader.jsx";
 import ConfirmDialog from "../../components/ConfirmDialog.jsx";
 import RecolteurDialog from "../../components/RecolteurDialog.jsx";
+import SuccessDialog from "../../components/SuccessDialog.jsx";
 import { useToast } from "../../context/ToastContext.jsx";
 import { createRecolteur, deleteRecolteur, getRecolteursStats, listRecolteurs, updateRecolteur } from "../../services/recolteurService.js";
 import { getToken } from "../../services/authService.js";
@@ -24,11 +26,40 @@ export default function ListeRecolteurs() {
   const [openForm, setOpenForm] = useState(false);
   const [editing, setEditing] = useState(null);
   const [toDelete, setToDelete] = useState(null);
+  const [success, setSuccess] = useState({ open: false, message: "" });
+
+  const statsById = (() => {
+    const map = new Map();
+    for (const s of statsRows || []) map.set(String(s.id), s);
+    return map;
+  })();
+
+  const rowsWithStatus = (rows || []).map((r) => {
+    const s = statsById.get(String(r.id));
+    const isActive = (Number(s?.fiches_count || 0) || 0) > 0;
+    return {
+      ...r,
+      statut: loadingStats ? "" : isActive ? "Actif" : "Inactif",
+    };
+  });
 
   const columns = [
     { key: "code", label: "Code" },
     { key: "nom", label: "Nom" },
     { key: "lieu_residence", label: "Lieu de residence" },
+    {
+      key: "statut",
+      label: `Statut (${statsYear})`,
+      render: (row) => {
+        if (!row.statut) return <span className="muted">...</span>;
+        const active = row.statut === "Actif";
+        return (
+          <span className={`status-badge ${active ? "active" : "inactive"}`}>
+            {row.statut}
+          </span>
+        );
+      },
+    },
     {
       key: "actions",
       label: "Actions",
@@ -49,7 +80,7 @@ export default function ListeRecolteurs() {
       const recolteursData = await listRecolteurs();
       setRows(recolteursData || []);
     } catch (err) {
-      pushToast({ type: "error", title: "Erreur API", message: err.message });
+      pushToast({ type: "error", title: "Recolteurs", message: err.message });
     } finally {
       setLoading(false);
     }
@@ -65,7 +96,7 @@ export default function ListeRecolteurs() {
       const data = await getRecolteursStats(statsYear);
       setStatsRows(data?.recolteurs || []);
     } catch (err) {
-      pushToast({ type: "error", title: "Erreur API", message: err.message });
+      pushToast({ type: "error", title: "Recolteurs", message: err.message });
     } finally {
       setLoadingStats(false);
     }
@@ -104,22 +135,21 @@ export default function ListeRecolteurs() {
   const handleSubmit = async (form) => {
     try {
       const payload = {
-        code: form.code,
         nom: form.nom,
         lieu_residence: form.lieu_residence,
       };
 
       if (editing) {
         await updateRecolteur(editing.id, payload);
-        pushToast({ type: "success", title: "Recolteur modifie", message: form.nom });
+        setSuccess({ open: true, message: "Recolteur modifie avec succes" });
       } else {
         await createRecolteur(payload);
-        pushToast({ type: "success", title: "Recolteur ajoute", message: form.nom });
+        setSuccess({ open: true, message: "Recolteur ajoute avec succes" });
       }
       setOpenForm(false);
       load();
     } catch (err) {
-      pushToast({ type: "error", title: "Erreur API", message: err.message });
+      pushToast({ type: "error", title: "Recolteurs", message: err.message });
     }
   };
 
@@ -131,7 +161,7 @@ export default function ListeRecolteurs() {
       setToDelete(null);
       load();
     } catch (err) {
-      pushToast({ type: "error", title: "Erreur API", message: err.message });
+      pushToast({ type: "error", title: "Recolteurs", message: err.message });
     }
   };
 
@@ -140,12 +170,20 @@ export default function ListeRecolteurs() {
       <div className="page-header-row">
         <h2>Liste recolteurs</h2>
         <div className="row-actions">
+          <label>
+            Annee
+            <select value={statsYear} onChange={(e) => setStatsYear(Number(e.target.value))}>
+              {Array.from({ length: 10 }, (_, i) => new Date().getFullYear() - i).map((y) => (
+                <option key={y} value={y}>{y}</option>
+              ))}
+            </select>
+          </label>
           <button className="btn-ghost" onClick={handleExport}>Exporter Excel</button>
           <button className="btn-primary" onClick={handleAdd}>Ajouter</button>
         </div>
       </div>
 
-      {loading ? <p>Chargement...</p> : <DataTable columns={columns} rows={rows} pageSize={5} />}
+      {loading ? <LogoLoader /> : <DataTable columns={columns} rows={rowsWithStatus} pageSize={5} />}
 
       <RecolteurDialog
         open={openForm}
@@ -163,18 +201,16 @@ export default function ListeRecolteurs() {
         confirmLabel="Supprimer"
       />
 
+      <SuccessDialog
+        open={success.open}
+        message={success.message}
+        onClose={() => setSuccess({ open: false, message: "" })}
+      />
+
       <section className="fiche-section fiche-analytics">
         <div className="page-header-row">
-          <h3>Statistiques recolteurs</h3>
+          <h3>Statistiques recolteurs ({statsYear})</h3>
           <div className="row-actions">
-            <label>
-              Annee
-              <select value={statsYear} onChange={(e) => setStatsYear(Number(e.target.value))}>
-                {Array.from({ length: 10 }, (_, i) => new Date().getFullYear() - i).map((y) => (
-                  <option key={y} value={y}>{y}</option>
-                ))}
-              </select>
-            </label>
             <button className="btn-ghost" onClick={loadStats} disabled={loadingStats}>
               {loadingStats ? "Chargement..." : "Rafraichir"}
             </button>
@@ -182,7 +218,7 @@ export default function ListeRecolteurs() {
         </div>
 
         {loadingStats ? (
-          <p>Chargement...</p>
+          <LogoLoader compact size={70} />
         ) : (
           <DataTable
             columns={[

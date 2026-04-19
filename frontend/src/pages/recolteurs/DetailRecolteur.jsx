@@ -3,6 +3,7 @@ import { useNavigate, useParams } from "react-router-dom";
 import ChartCard from "../../components/ChartCard.jsx";
 import ChartDialog from "../../components/ChartDialog.jsx";
 import DataTable from "../../components/DataTable.jsx";
+import LogoLoader from "../../components/LogoLoader.jsx";
 import { useToast } from "../../context/ToastContext.jsx";
 import { getRecolteurAnalytics } from "../../services/recolteurService.js";
 import { getToken } from "../../services/authService.js";
@@ -30,7 +31,7 @@ export default function DetailRecolteur() {
       const d = await getRecolteurAnalytics(id, year);
       setData(d);
     } catch (err) {
-      pushToast({ type: "error", title: "Erreur API", message: err.message });
+      pushToast({ type: "error", title: "Recolteur", message: err.message });
     } finally {
       setLoading(false);
     }
@@ -128,7 +129,7 @@ export default function DetailRecolteur() {
       </div>
 
       {loading ? (
-        <p>Chargement...</p>
+        <LogoLoader />
       ) : (
         <>
           <section className="stats-grid">

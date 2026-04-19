@@ -1,22 +1,12 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import ChartCard from "./ChartCard.jsx";
+import useBodyScrollLock from "../utils/useBodyScrollLock.js";
 
 // Modal dialog for expanded chart
 export default function ChartDialog({ open, onClose, chart }) {
   const [instance, setInstance] = useState(null);
 
-  // Lock body scroll when dialog is open
-  useEffect(() => {
-    if (!open) {
-      document.body.style.overflow = "";
-      return;
-    }
-    const prev = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
-    return () => {
-      document.body.style.overflow = prev;
-    };
-  }, [open]);
+  useBodyScrollLock(!!open);
 
   if (!open || !chart) return null;
 

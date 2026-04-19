@@ -1,4 +1,7 @@
+import useBodyScrollLock from "../utils/useBodyScrollLock.js";
+
 export default function FicheTravauxDialog({ open, onClose, fiche }) {
+  useBodyScrollLock(!!open);
   if (!open || !fiche) return null;
 
   const secteurs = fiche.secteurs_couverts_codes || [];
@@ -66,4 +69,3 @@ export default function FicheTravauxDialog({ open, onClose, fiche }) {
     </div>
   );
 }
-

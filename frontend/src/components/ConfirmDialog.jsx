@@ -1,4 +1,6 @@
 // Reusable confirmation modal
+import useBodyScrollLock from "../utils/useBodyScrollLock.js";
+
 export default function ConfirmDialog({
   open,
   title = "Confirmer",
@@ -7,6 +9,7 @@ export default function ConfirmDialog({
   onConfirm,
   confirmLabel = "Confirmer",
 }) {
+  useBodyScrollLock(!!open);
   if (!open) return null;
 
   return (

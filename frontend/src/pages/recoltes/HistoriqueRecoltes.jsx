@@ -9,9 +9,12 @@ import { listSecteurs } from "../../services/secteurService.js";
 import { createFiche, getRecoltesAnalytics, listFiches } from "../../services/recolteService.js";
 import { listRecolteurs } from "../../services/recolteurService.js";
 import DataTable from "../../components/DataTable.jsx";
+import LogoLoader from "../../components/LogoLoader.jsx";
 import FicheDialog from "../../components/FicheDialog.jsx";
 import ChartCard from "../../components/ChartCard.jsx";
 import ChartDialog from "../../components/ChartDialog.jsx";
+import SuccessDialog from "../../components/SuccessDialog.jsx";
+import SearchableSelect from "../../components/SearchableSelect.jsx";
 import { getToken } from "../../services/authService.js";
 
 const API_BASE = import.meta.env.VITE_API_URL || "http://127.0.0.1:8000/api";
@@ -20,9 +23,12 @@ const API_BASE = import.meta.env.VITE_API_URL || "http://127.0.0.1:8000/api";
 export default function HistoriqueRecoltes() {
   const { pushToast } = useToast();
 
+  const [tab, setTab] = useState("saisie"); // saisie | analyses | historique
+
   // Etat global de la fiche
   const [fiche, setFiche] = useState(ficheRecolteInitial);
   const [saving, setSaving] = useState(false);
+  const [fieldErrors, setFieldErrors] = useState({});
 
   // Secteurs visibles dans la fiche (depuis l'API)
   const [secteurList, setSecteurList] = useState(secteurCodes);
@@ -32,11 +38,62 @@ export default function HistoriqueRecoltes() {
   const [recolteursList, setRecolteursList] = useState([]);
   const [history, setHistory] = useState([]);
   const [loadingHistory, setLoadingHistory] = useState(false);
+  const [historyLoaded, setHistoryLoaded] = useState(false);
   const [selectedFiche, setSelectedFiche] = useState(null);
   const [analytics, setAnalytics] = useState(null);
   const [loadingAnalytics, setLoadingAnalytics] = useState(false);
+  const [analyticsLoadedOnce, setAnalyticsLoadedOnce] = useState(false);
   const [analyticsYear, setAnalyticsYear] = useState(new Date().getFullYear());
   const [activeChart, setActiveChart] = useState(null);
+  const [success, setSuccess] = useState({ open: false, message: "" });
+
+  const scrollToFirstError = () => {
+    requestAnimationFrame(() => {
+      const root = document.querySelector(".page.fiche");
+      if (!root) return;
+      const el =
+        root.querySelector(".input-error") || root.querySelector(".section-error");
+      if (el && typeof el.scrollIntoView === "function") {
+        el.scrollIntoView({ behavior: "smooth", block: "center" });
+      }
+    });
+  };
+
+  const clearSimpleError = (key) => {
+    setFieldErrors((prev) => {
+      if (!prev || !prev[key]) return prev;
+      const next = { ...prev };
+      delete next[key];
+      return next;
+    });
+  };
+
+  const clearIdError = (groupKey, id) => {
+    setFieldErrors((prev) => {
+      const group = prev?.[groupKey];
+      if (!group || !group[id]) return prev;
+      const nextGroup = { ...group };
+      delete nextGroup[id];
+      const next = { ...prev, [groupKey]: nextGroup };
+      if (Object.keys(nextGroup).length === 0) delete next[groupKey];
+      return next;
+    });
+  };
+
+  const clearNestedError = (groupKey, id, field) => {
+    setFieldErrors((prev) => {
+      const group = prev?.[groupKey];
+      const row = group?.[id];
+      if (!row || !row[field]) return prev;
+      const nextRow = { ...row };
+      delete nextRow[field];
+      const nextGroup = { ...group, [id]: nextRow };
+      if (Object.keys(nextRow).length === 0) delete nextGroup[id];
+      const next = { ...prev, [groupKey]: nextGroup };
+      if (Object.keys(nextGroup).length === 0) delete next[groupKey];
+      return next;
+    });
+  };
 
   // Helper: cree un recolteur vide avec les colonnes secteurs
   const createEmptyRecolteur = (list = secteurList) => {
@@ -57,6 +114,20 @@ export default function HistoriqueRecoltes() {
     const selected = new Set(activeSecteurCodes);
     return secteurList.filter((s) => selected.has(s.code));
   }, [secteurList, activeSecteurCodes]);
+
+  const secteursOrRecolteursOptions = useMemo(() => {
+    const secs = (secteurList || []).map((sec) => ({
+      value: sec.code,
+      label: `${sec.code} - ${sec.nom}`,
+      group: "Secteurs",
+    }));
+    const recs = (recolteursList || []).map((r) => ({
+      value: r.nom,
+      label: `${r.code ? `${r.code} - ` : ""}${r.nom}`,
+      group: "Recolteurs",
+    }));
+    return [...secs, ...recs];
+  }, [secteurList, recolteursList]);
 
   const secteurChoiceValue = useMemo(() => {
     const all = secteurList.map((s) => s.code);
@@ -102,7 +173,7 @@ export default function HistoriqueRecoltes() {
       setSecteurList(mapped.length ? mapped : secteurCodes);
       setActiveSecteurCodes((mapped.length ? mapped : secteurCodes).map((s) => s.code));
     } catch (err) {
-      pushToast({ type: "error", title: "Erreur API", message: err.message });
+      pushToast({ type: "error", title: "Recoltes", message: err.message });
     }
   };
 
@@ -111,7 +182,7 @@ export default function HistoriqueRecoltes() {
       const data = await listRecolteurs();
       setRecolteursList(data || []);
     } catch (err) {
-      pushToast({ type: "error", title: "Erreur API", message: err.message });
+      pushToast({ type: "error", title: "Recoltes", message: err.message });
     }
   };
 
@@ -120,8 +191,9 @@ export default function HistoriqueRecoltes() {
       setLoadingAnalytics(true);
       const data = await getRecoltesAnalytics(year);
       setAnalytics(data);
+      setAnalyticsLoadedOnce(true);
     } catch (err) {
-      pushToast({ type: "error", title: "Erreur API", message: err.message });
+      pushToast({ type: "error", title: "Recoltes", message: err.message });
     } finally {
       setLoadingAnalytics(false);
     }
@@ -130,12 +202,26 @@ export default function HistoriqueRecoltes() {
   useEffect(() => {
     loadSecteurs();
     loadRecolteurs();
-    loadHistory();
   }, []);
 
   useEffect(() => {
+    if (tab !== "analyses") return;
     loadAnalytics(analyticsYear);
-  }, [analyticsYear]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tab, analyticsYear]);
+
+  useEffect(() => {
+    if (tab !== "historique") return;
+    if (historyLoaded) return;
+    loadHistory();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tab, historyLoaded]);
+
+  // Lorsqu'on change d'onglet, on ferme les popups ouvertes (evite les superpositions bizarres)
+  useEffect(() => {
+    setSelectedFiche(null);
+    setActiveChart(null);
+  }, [tab]);
 
   // Synchronise les colonnes des regimes si la liste des secteurs change
   useEffect(() => {
@@ -160,7 +246,10 @@ export default function HistoriqueRecoltes() {
 
   // Mise a jour des champs simples (date, superviseur)
   const handleHeaderChange = (e) => {
-    setFiche((prev) => ({ ...prev, [e.target.name]: e.target.value }));
+    const { name, value } = e.target;
+    setFiche((prev) => ({ ...prev, [name]: value }));
+    if (name === "date") clearSimpleError("date");
+    if (name === "superviseurGeneral") clearSimpleError("superviseurGeneral");
   };
 
   // Bareme (Grds/Moy/Ptits)
@@ -179,6 +268,7 @@ export default function HistoriqueRecoltes() {
         s.id === id ? { ...s, [field]: value } : s
       ),
     }));
+    clearNestedError("adjoints", id, field);
   };
 
   const addAdjoint = () => {
@@ -196,6 +286,7 @@ export default function HistoriqueRecoltes() {
       ...prev,
       superviseursAdjoints: prev.superviseursAdjoints.filter((s) => s.id !== id),
     }));
+    clearIdError("adjoints", id);
   };
 
   // Recolteurs (nom)
@@ -206,6 +297,7 @@ export default function HistoriqueRecoltes() {
         r.id === id ? { ...r, nom: value } : r
       ),
     }));
+    clearIdError("recolteurs", id);
   };
 
   const addRecolteur = () => {
@@ -220,6 +312,7 @@ export default function HistoriqueRecoltes() {
       ...prev,
       recolteurs: prev.recolteurs.filter((r) => r.id !== id),
     }));
+    clearIdError("recolteurs", id);
   };
 
   // Mise a jour des regimes (cellules du grand tableau)
@@ -240,6 +333,7 @@ export default function HistoriqueRecoltes() {
         };
       }),
     }));
+    clearSimpleError("denombrement");
   };
 
   // Depenses
@@ -256,6 +350,7 @@ export default function HistoriqueRecoltes() {
       ...prev,
       recus: prev.recus.map((r) => (r.id === id ? { ...r, [field]: value } : r)),
     }));
+    clearNestedError("recus", id, field);
   };
 
   const addRecu = () => {
@@ -273,10 +368,18 @@ export default function HistoriqueRecoltes() {
       ...prev,
       recus: prev.recus.filter((r) => r.id !== id),
     }));
+    clearIdError("recus", id);
   };
 
-  // Construit le payload conforme a l'API
+  // Valide + construit le payload conforme a l'API (retourne aussi les erreurs par champ)
   const buildPayload = () => {
+    const errors = {};
+
+    if (!fiche.date) errors.date = "Date requise";
+    if (!String(fiche.superviseurGeneral || "").trim()) {
+      errors.superviseurGeneral = "Superviseur general requis";
+    }
+
     const secteurByCode = new Map(secteurList.map((s) => [s.code, s]));
     const recolteurByName = new Map(
       recolteursList
@@ -284,58 +387,170 @@ export default function HistoriqueRecoltes() {
         .map((r) => [r.nom.trim().toLowerCase(), r])
     );
 
-    // Lignes par recolteur et par type de regime
-    const lignes = fiche.recolteurs.flatMap((r) =>
-      regimeTypes.map((reg) => ({
-        recolteur: recolteurByName.get((r.nom || "").trim().toLowerCase())?.id || null,
-        recolteur_nom: r.nom,
-        regime_type: reg.key,
-        details: secteurList
-          .map((s) => ({
-            secteur: secteurByCode.get(s.code)?.id || null,
-            secteur_code: s.code,
-            quantite: Number(r.regimes[reg.key][s.code]) || 0,
-          }))
-          .filter((d) => Number(d.quantite) > 0),
-      }))
-    );
+    // Superviseurs adjoints (ignore lignes vides; si partiel => erreurs par cellule)
+    const superviseurs_adjoints = [];
+    const adjointsErrors = {};
+    for (const s of fiche.superviseursAdjoints || []) {
+      const nom = String(s.nom || "").trim();
+      const secteur = String(s.secteur || "").trim();
+      if (!nom && !secteur) continue;
 
-    return {
+      if (!nom) {
+        adjointsErrors[s.id] = { ...(adjointsErrors[s.id] || {}), nom: "Nom requis" };
+      }
+      if (!secteur) {
+        adjointsErrors[s.id] = {
+          ...(adjointsErrors[s.id] || {}),
+          secteur: "Secteurs ou recolteurs requis",
+        };
+      }
+
+      if (nom && secteur) {
+        superviseurs_adjoints.push({
+          nom,
+          secteur_ou_recolteur: secteur,
+        });
+      }
+    }
+    if (Object.keys(adjointsErrors).length > 0) errors.adjoints = adjointsErrors;
+
+    // Lignes par recolteur et par type de regime (quantite > 0)
+    const lignes = [];
+    const recolteursErrors = {};
+    let hasAnyQtyOverall = false;
+
+    for (const r of fiche.recolteurs || []) {
+      const nom = String(r.nom || "").trim();
+
+      let rowHasQty = false;
+      for (const reg of regimeTypes) {
+        for (const s of secteurList) {
+          const q = Number(r.regimes?.[reg.key]?.[s.code]) || 0;
+          if (q > 0) {
+            rowHasQty = true;
+            hasAnyQtyOverall = true;
+            break;
+          }
+        }
+        if (rowHasQty) break;
+      }
+
+      // Ligne totalement vide => ignoree
+      if (!nom && !rowHasQty) continue;
+
+      if (!nom && rowHasQty) {
+        recolteursErrors[r.id] = "Nom requis";
+        continue;
+      }
+
+      const recolteurId = recolteurByName.get(nom.toLowerCase())?.id || null;
+
+      for (const reg of regimeTypes) {
+        const details = [];
+        for (const s of secteurList) {
+          const q = Number(r.regimes?.[reg.key]?.[s.code]) || 0;
+          if (q > 0) {
+            details.push({
+              secteur: secteurByCode.get(s.code)?.id || null,
+              secteur_code: s.code,
+              quantite: q,
+            });
+          }
+        }
+        if (details.length === 0) continue;
+        lignes.push({
+          recolteur: recolteurId,
+          recolteur_nom: nom,
+          regime_type: reg.key,
+          details,
+        });
+      }
+    }
+
+    if (!hasAnyQtyOverall) {
+      errors.denombrement = "Saisis au moins une quantite > 0";
+    }
+    if (Object.keys(recolteursErrors).length > 0) errors.recolteurs = recolteursErrors;
+
+    // Recus de vente (ignore recus vides; si saisi => date + montant)
+    const recus = [];
+    const recusErrors = {};
+
+    for (const r of fiche.recus || []) {
+      const date = String(r.date || "").trim();
+      const client = String(r.client || "").trim();
+      const pesee = String(r.peseeKg || "").trim();
+      const nonConf = String(r.nonConformes || "").trim();
+      const montantRaw = String(r.montant || "").trim();
+
+      const hasAny = !!date || !!client || !!pesee || !!nonConf || !!montantRaw;
+      if (!hasAny) continue;
+
+      const montant = Number(montantRaw) || 0;
+      if (!date) {
+        recusErrors[r.id] = { ...(recusErrors[r.id] || {}), date: "Date requise" };
+      }
+      if (!(montant > 0)) {
+        recusErrors[r.id] = { ...(recusErrors[r.id] || {}), montant: "Montant requis" };
+      }
+
+      if (date && montant > 0) {
+        recus.push({
+          date: date || null,
+          client,
+          pesee_kg: Number(pesee) || 0,
+          non_conformes_pct: Number(nonConf) || 0,
+          montant,
+        });
+      }
+    }
+
+    if (Object.keys(recusErrors).length > 0) errors.recus = recusErrors;
+
+    const payload = {
       date: fiche.date,
-      superviseur_general: fiche.superviseurGeneral,
+      superviseur_general: String(fiche.superviseurGeneral || "").trim(),
       bareme_grands: Number(fiche.bareme.grands) || 0,
       bareme_moyens: Number(fiche.bareme.moyens) || 0,
       bareme_petits: Number(fiche.bareme.petits) || 0,
       depense_nourriture: Number(fiche.depenses.nourriture) || 0,
       depense_transport: Number(fiche.depenses.transport) || 0,
       observations: fiche.observations || "",
-      superviseurs_adjoints: fiche.superviseursAdjoints.map((s) => ({
-        nom: s.nom,
-        secteur_ou_recolteur: s.secteur,
-      })),
+      superviseurs_adjoints,
       lignes,
-      recus: fiche.recus.map((r) => ({
-        date: r.date || null,
-        client: r.client,
-        pesee_kg: Number(r.peseeKg) || 0,
-        non_conformes_pct: Number(r.nonConformes) || 0,
-        montant: Number(r.montant) || 0,
-      })),
+      recus,
     };
+
+    return { payload, errors };
   };
 
   // Enregistre la fiche (POST ou PUT)
   const handleSave = async () => {
+    const { payload, errors } = buildPayload();
+    const hasErrors = Object.keys(errors || {}).length > 0;
+    if (hasErrors) {
+      setFieldErrors(errors);
+      pushToast({
+        type: "warning",
+        title: "Champs obligatoires",
+        message: "Corrige les champs en rouge avant d'enregistrer",
+      });
+      scrollToFirstError();
+      return;
+    }
+
+    setFieldErrors({});
+
     try {
       setSaving(true);
-      const payload = buildPayload();
       await createFiche(payload);
-      pushToast({ type: "success", title: "Fiche enregistree" });
-      loadHistory(); // Recharge l'historique apres sauvegarde
-      loadAnalytics();
-      handleReset();
+      setSuccess({ open: true, message: "Recolte ajoutee avec succes" });
+      // Historique: si deja charge, on le met a jour tout de suite.
+      // Analyses: on rafraichira automatiquement au moment ou l'onglet sera ouvert.
+      if (historyLoaded) loadHistory();
+      if (analyticsLoadedOnce && tab === "analyses") loadAnalytics(analyticsYear);
     } catch (err) {
-      pushToast({ type: "error", title: "Erreur API", message: err.message });
+      pushToast({ type: "error", title: "Recoltes", message: err.message });
     } finally {
       setSaving(false);
     }
@@ -344,6 +559,7 @@ export default function HistoriqueRecoltes() {
   // Nouvelle fiche (reset)
   const handleReset = () => {
     setFiche(ficheRecolteInitial);
+    setFieldErrors({});
   };
 
   // Chargement de l'historique des fiches
@@ -352,8 +568,9 @@ export default function HistoriqueRecoltes() {
       setLoadingHistory(true);
       const data = await listFiches();
       setHistory(data || []);
+      setHistoryLoaded(true);
     } catch (err) {
-      pushToast({ type: "error", title: "Erreur API", message: err.message });
+      pushToast({ type: "error", title: "Recoltes", message: err.message });
     } finally {
       setLoadingHistory(false);
     }
@@ -435,31 +652,93 @@ export default function HistoriqueRecoltes() {
 
   return (
     <div className="page fiche">
-      <datalist id="secteurs-options">
-        {secteurList.map((s) => (
-          <option key={s.code} value={s.code} label={s.nom} />
-        ))}
-      </datalist>
-      <datalist id="recolteurs-options">
-        {recolteursList.map((r) => (
-          <option key={r.id} value={r.nom} />
-        ))}
-      </datalist>
-
-      <header className="fiche-header">
-        <h2>Fiche de recolte</h2>
-        <div className="row-actions">
-          <button className="btn-ghost" onClick={handleReset}>
-            Nouvelle fiche
-          </button>
-          <button className="btn-primary" onClick={handleSave} disabled={saving}>
-            {saving ? "Enregistrement..." : "Enregistrer"}
-          </button>
+      <div className="page-header-row">
+        <div>
+          <h2>Recoltes</h2>
+          <p className="dashboard-subtitle">Saisie, analyses et historique</p>
         </div>
-      </header>
+
+        {tab === "saisie" && (
+          <div className="row-actions">
+            <button className="btn-ghost" onClick={handleReset}>
+              Nouvelle fiche
+            </button>
+            <button className="btn-primary" onClick={handleSave} disabled={saving}>
+              {saving ? "Enregistrement..." : "Enregistrer"}
+            </button>
+          </div>
+        )}
+
+        {tab === "analyses" && (
+          <div className="row-actions">
+            <label>
+              Annee
+              <select
+                value={analyticsYear}
+                onChange={(e) => setAnalyticsYear(Number(e.target.value))}
+              >
+                {analyticsYears.map((y) => (
+                  <option key={y} value={y}>
+                    {y}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <button
+              className="btn-ghost"
+              onClick={() => loadAnalytics(analyticsYear)}
+              disabled={loadingAnalytics}
+            >
+              {loadingAnalytics ? "Chargement..." : "Rafraichir"}
+            </button>
+            <button className="btn-ghost" onClick={handleExport}>
+              Exporter Excel
+            </button>
+          </div>
+        )}
+
+        {tab === "historique" && (
+          <div className="row-actions">
+            <button className="btn-ghost" onClick={handleExport}>
+              Exporter Excel
+            </button>
+            <button className="btn-ghost" onClick={loadHistory} disabled={loadingHistory}>
+              {loadingHistory ? "Chargement..." : "Rafraichir"}
+            </button>
+          </div>
+        )}
+      </div>
+
+      <div className="tabs">
+        <button
+          className={`tab-btn ${tab === "saisie" ? "active" : ""}`}
+          onClick={() => setTab("saisie")}
+        >
+          Saisie
+        </button>
+        <button
+          className={`tab-btn ${tab === "analyses" ? "active" : ""}`}
+          onClick={() => setTab("analyses")}
+        >
+          Analyses
+        </button>
+        <button
+          className={`tab-btn ${tab === "historique" ? "active" : ""}`}
+          onClick={() => setTab("historique")}
+        >
+          Historique
+        </button>
+      </div>
+
+      {tab === "saisie" && (
+        <>
 
       {/* En-tete de la fiche */}
-      <section className="fiche-section">
+      <section
+        className={`fiche-section ${
+          fieldErrors.date || fieldErrors.superviseurGeneral ? "section-error" : ""
+        }`}
+      >
         <h3>En-tete</h3>
         <div className="fiche-header-grid">
           <label>
@@ -467,30 +746,39 @@ export default function HistoriqueRecoltes() {
             <input
               type="date"
               name="date"
-              className="fiche-input"
+              className={`fiche-input ${fieldErrors.date ? "input-error" : ""}`}
               value={fiche.date}
               onChange={handleHeaderChange}
             />
+            {fieldErrors.date && <span className="field-error">{fieldErrors.date}</span>}
           </label>
           <label>
             Superviseur general
             <input
               name="superviseurGeneral"
-              className="fiche-input"
+              className={`fiche-input ${fieldErrors.superviseurGeneral ? "input-error" : ""}`}
               value={fiche.superviseurGeneral}
               onChange={handleHeaderChange}
               placeholder="Nom du superviseur"
             />
+            {fieldErrors.superviseurGeneral && (
+              <span className="field-error">{fieldErrors.superviseurGeneral}</span>
+            )}
           </label>
         </div>
       </section>
 
       {/* Superviseurs adjoints */}
-      <section className="fiche-section">
+      <section className={`fiche-section ${fieldErrors.adjoints ? "section-error" : ""}`}>
         <div className="section-row">
           <h3>Superviseurs adjoints</h3>
           <button className="btn-ghost" onClick={addAdjoint}>Ajouter</button>
         </div>
+        {fieldErrors.adjoints && (
+          <div className="field-error">
+            Complete les superviseurs adjoints (Nom + Secteurs/Recolteurs).
+          </div>
+        )}
         <div className="fiche-table-wrapper">
           <table className="simple-table">
             <thead>
@@ -505,33 +793,28 @@ export default function HistoriqueRecoltes() {
                 <tr key={s.id}>
                   <td>
                     <input
-                      className="fiche-input"
+                      className={`fiche-input ${
+                        fieldErrors.adjoints?.[s.id]?.nom ? "input-error" : ""
+                      }`}
                       value={s.nom}
                       onChange={(e) => handleAdjointChange(s.id, "nom", e.target.value)}
                     />
+                    {fieldErrors.adjoints?.[s.id]?.nom && (
+                      <div className="field-error">{fieldErrors.adjoints[s.id].nom}</div>
+                    )}
                   </td>
                   <td>
-                    <select
-                      className="fiche-input"
+                    <SearchableSelect
                       value={s.secteur || ""}
-                      onChange={(e) => handleAdjointChange(s.id, "secteur", e.target.value)}
-                    >
-                      <option value="">-- Choisir --</option>
-                      <optgroup label="Secteurs">
-                        {secteurList.map((sec) => (
-                          <option key={`sec-${sec.code}`} value={sec.code}>
-                            {sec.code} - {sec.nom}
-                          </option>
-                        ))}
-                      </optgroup>
-                      <optgroup label="Recolteurs">
-                        {recolteursList.map((r) => (
-                          <option key={`rec-${r.id}`} value={r.nom}>
-                            {r.code ? `${r.code} - ` : ""}{r.nom}
-                          </option>
-                        ))}
-                      </optgroup>
-                    </select>
+                      options={secteursOrRecolteursOptions}
+                      onChange={(v) => handleAdjointChange(s.id, "secteur", v)}
+                      placeholder="Rechercher..."
+                      clearable
+                      className={fieldErrors.adjoints?.[s.id]?.secteur ? "input-error" : ""}
+                    />
+                    {fieldErrors.adjoints?.[s.id]?.secteur && (
+                      <div className="field-error">{fieldErrors.adjoints[s.id].secteur}</div>
+                    )}
                   </td>
                   <td>
                     <button className="btn-danger btn-mini" onClick={() => removeAdjoint(s.id)}>
@@ -567,11 +850,19 @@ export default function HistoriqueRecoltes() {
       </section>
 
       {/* Dombrement des regimes */}
-      <section className="fiche-section">
+      <section
+        className={`fiche-section ${
+          fieldErrors.denombrement || fieldErrors.recolteurs ? "section-error" : ""
+        }`}
+      >
         <div className="section-row">
           <h3>Denombrement des regimes par secteur et par recolteur</h3>
           <button className="btn-ghost" onClick={addRecolteur}>Ajouter recolteur</button>
         </div>
+
+        {fieldErrors.denombrement && (
+          <div className="field-error">{fieldErrors.denombrement}</div>
+        )}
 
         <div className="filters-bar">
           <label>
@@ -617,13 +908,21 @@ export default function HistoriqueRecoltes() {
                     {idx === 0 && (
                       <td rowSpan={regimeTypes.length} className="row-head">
                         <div className="row-head-content">
-                          <input
-                            className="fiche-input"
+                          <SearchableSelect
                             value={r.nom}
-                            list="recolteurs-options"
-                            onChange={(e) => handleRecolteurName(r.id, e.target.value)}
+                            options={(recolteursList || []).map((x) => ({
+                              value: x.nom,
+                              label: `${x.code ? `${x.code} - ` : ""}${x.nom}`,
+                              group: "",
+                            }))}
+                            onChange={(v) => handleRecolteurName(r.id, v)}
                             placeholder="Nom recolteur"
+                            clearable
+                            className={fieldErrors.recolteurs?.[r.id] ? "input-error" : ""}
                           />
+                          {fieldErrors.recolteurs?.[r.id] && (
+                            <span className="field-error">{fieldErrors.recolteurs[r.id]}</span>
+                          )}
                           <button className="btn-danger btn-mini" onClick={() => removeRecolteur(r.id)}>
                             Supprimer
                           </button>
@@ -702,11 +1001,16 @@ export default function HistoriqueRecoltes() {
       </section>
 
       {/* Recus de vente */}
-      <section className="fiche-section">
+      <section className={`fiche-section ${fieldErrors.recus ? "section-error" : ""}`}>
         <div className="section-row">
           <h3>Recu de vente</h3>
           <button className="btn-ghost" onClick={addRecu}>Ajouter recu</button>
         </div>
+        {fieldErrors.recus && (
+          <div className="field-error">
+            Complete les recus de vente (Date + Montant).
+          </div>
+        )}
         <div className="recus-grid">
           {fiche.recus.map((r) => (
             <div key={r.id} className="recu-card">
@@ -720,10 +1024,15 @@ export default function HistoriqueRecoltes() {
                 Date
                 <input
                   type="date"
-                  className="fiche-input"
+                  className={`fiche-input ${
+                    fieldErrors.recus?.[r.id]?.date ? "input-error" : ""
+                  }`}
                   value={r.date}
                   onChange={(e) => handleRecuChange(r.id, "date", e.target.value)}
                 />
+                {fieldErrors.recus?.[r.id]?.date && (
+                  <span className="field-error">{fieldErrors.recus[r.id].date}</span>
+                )}
               </label>
               <label>
                 Client
@@ -755,10 +1064,15 @@ export default function HistoriqueRecoltes() {
                 Montant (FCFA)
                 <input
                   type="number"
-                  className="fiche-input"
+                  className={`fiche-input ${
+                    fieldErrors.recus?.[r.id]?.montant ? "input-error" : ""
+                  }`}
                   value={r.montant}
                   onChange={(e) => handleRecuChange(r.id, "montant", e.target.value)}
                 />
+                {fieldErrors.recus?.[r.id]?.montant && (
+                  <span className="field-error">{fieldErrors.recus[r.id].montant}</span>
+                )}
               </label>
             </div>
           ))}
@@ -775,40 +1089,15 @@ export default function HistoriqueRecoltes() {
           onChange={(e) => setFiche((prev) => ({ ...prev, observations: e.target.value }))}
         />
       </section>
+        </>
+      )}
 
-      {/* Analyses & comparaisons */}
-      <section className="fiche-section">
-        <div className="page-header-row">
+      {tab === "analyses" && (
+        <section className="fiche-section fiche-analytics">
           <h3>Analyses et comparaisons</h3>
-          <div className="row-actions">
-            <label className="inline-label">
-              Annee
-              <select
-                value={analyticsYear}
-                onChange={(e) => setAnalyticsYear(Number(e.target.value))}
-              >
-                {analyticsYears.map((y) => (
-                  <option key={y} value={y}>
-                    {y}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <button
-              className="btn-ghost"
-              onClick={() => loadAnalytics(analyticsYear)}
-              disabled={loadingAnalytics}
-            >
-              Rafraichir
-            </button>
-            <button className="btn-ghost" onClick={handleExport}>
-              Exporter Excel
-            </button>
-          </div>
-        </div>
 
-        {loadingAnalytics ? (
-          <p>Chargement...</p>
+          {loadingAnalytics ? (
+          <LogoLoader compact size={70} />
         ) : (
           <>
             <div className="charts-grid">
@@ -913,22 +1202,19 @@ export default function HistoriqueRecoltes() {
             </div>
           </>
         )}
-      </section>
+        </section>
+      )}
 
-      {/* Historique des fiches */}
-      <section className="fiche-section fiche-history">
-        <div className="page-header-row">
+      {tab === "historique" && (
+        <section className="fiche-section fiche-history">
           <h3>Historique des fiches</h3>
-          <button className="btn-ghost" onClick={loadHistory} disabled={loadingHistory}>
-            {loadingHistory ? "Chargement..." : "Rafraichir"}
-          </button>
-        </div>
-        {loadingHistory ? (
-          <p>Chargement...</p>
-        ) : (
-          <DataTable columns={historyColumns} rows={historyRows} pageSize={5} />
-        )}
-      </section>
+          {loadingHistory ? (
+            <LogoLoader compact size={70} />
+          ) : (
+            <DataTable columns={historyColumns} rows={historyRows} pageSize={5} />
+          )}
+        </section>
+      )}
 
       <FicheDialog
         open={!!selectedFiche}
@@ -940,6 +1226,15 @@ export default function HistoriqueRecoltes() {
         open={!!activeChart}
         chart={activeChart}
         onClose={() => setActiveChart(null)}
+      />
+
+      <SuccessDialog
+        open={success.open}
+        message={success.message}
+        onClose={() => {
+          setSuccess({ open: false, message: "" });
+          handleReset();
+        }}
       />
     </div>
   );

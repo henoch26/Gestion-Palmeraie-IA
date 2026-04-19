@@ -15,17 +15,37 @@ async function apiRequest(path, options = {}) {
     headers.Authorization = `Token ${token}`;
   }
 
-  const res = await fetch(`${API_BASE}${path}`, {
-    ...options,
-    headers,
-  });
+  let res;
+  try {
+    res = await fetch(`${API_BASE}${path}`, {
+      ...options,
+      headers,
+    });
+  } catch {
+    throw new Error("Serveur indisponible");
+  }
 
   // 204: pas de contenu
   if (res.status === 204) return null;
 
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
-    const message = data.detail || data.error || "Erreur API";
+    const pickFirst = (obj) => {
+      if (!obj || typeof obj !== "object") return "";
+      const entries = Object.entries(obj);
+      if (!entries.length) return "";
+      const [, v] = entries[0];
+      if (Array.isArray(v)) return String(v[0] ?? "");
+      if (typeof v === "string") return v;
+      if (v && typeof v === "object") return pickFirst(v);
+      return String(v ?? "");
+    };
+
+    const message =
+      data.detail ||
+      data.error ||
+      pickFirst(data) ||
+      "Erreur serveur";
     throw new Error(message);
   }
 

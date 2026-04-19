@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
 import { useToast } from "../../context/ToastContext.jsx";
 import DataTable from "../../components/DataTable.jsx";
+import LogoLoader from "../../components/LogoLoader.jsx";
 import FicheTravauxDialog from "../../components/FicheTravauxDialog.jsx";
+import SuccessDialog from "../../components/SuccessDialog.jsx";
 import { ficheTravauxInitial } from "../../data/ficheTravauxData.js";
 import { listSecteurs } from "../../services/secteurService.js";
 import { createFicheTravaux, listFichesTravaux } from "../../services/travauxService.js";
@@ -24,13 +26,14 @@ export default function HistoriqueTravaux() {
   const [history, setHistory] = useState([]);
   const [loadingHistory, setLoadingHistory] = useState(false);
   const [selectedFiche, setSelectedFiche] = useState(null);
+  const [success, setSuccess] = useState({ open: false, message: "" });
 
   const loadSecteurs = async () => {
     try {
       const data = await listSecteurs();
       setSecteurs(data || []);
     } catch (err) {
-      pushToast({ type: "error", title: "Erreur API", message: err.message });
+      pushToast({ type: "error", title: "Travaux", message: err.message });
     }
   };
 
@@ -40,7 +43,7 @@ export default function HistoriqueTravaux() {
       const data = await listFichesTravaux();
       setHistory(data || []);
     } catch (err) {
-      pushToast({ type: "error", title: "Erreur API", message: err.message });
+      pushToast({ type: "error", title: "Travaux", message: err.message });
     } finally {
       setLoadingHistory(false);
     }
@@ -171,11 +174,10 @@ export default function HistoriqueTravaux() {
       setSaving(true);
       const payload = buildPayload();
       await createFicheTravaux(payload);
-      pushToast({ type: "success", title: "Fiche travaux enregistree" });
-      handleReset();
+      setSuccess({ open: true, message: "Fiche travaux enregistree avec succes" });
       loadHistory();
     } catch (err) {
-      pushToast({ type: "error", title: "Erreur API", message: err.message });
+      pushToast({ type: "error", title: "Travaux", message: err.message });
     } finally {
       setSaving(false);
     }
@@ -491,7 +493,7 @@ export default function HistoriqueTravaux() {
         </div>
 
         {loadingHistory ? (
-          <p>Chargement...</p>
+          <LogoLoader compact size={70} />
         ) : (
           <DataTable columns={historyColumns} rows={historyRows} pageSize={5} />
         )}
@@ -501,6 +503,15 @@ export default function HistoriqueTravaux() {
         open={!!selectedFiche}
         fiche={selectedFiche}
         onClose={() => setSelectedFiche(null)}
+      />
+
+      <SuccessDialog
+        open={success.open}
+        message={success.message}
+        onClose={() => {
+          setSuccess({ open: false, message: "" });
+          handleReset();
+        }}
       />
     </div>
   );

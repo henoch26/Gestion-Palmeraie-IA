@@ -3,6 +3,7 @@ import { useNavigate, useParams } from "react-router-dom";
 import ChartCard from "../../components/ChartCard.jsx";
 import ChartDialog from "../../components/ChartDialog.jsx";
 import DataTable from "../../components/DataTable.jsx";
+import LogoLoader from "../../components/LogoLoader.jsx";
 import { useToast } from "../../context/ToastContext.jsx";
 import { getSecteurAnalytics } from "../../services/secteurService.js";
 import { getToken } from "../../services/authService.js";
@@ -30,7 +31,7 @@ export default function DetailSecteur() {
       const d = await getSecteurAnalytics(id, year);
       setData(d);
     } catch (err) {
-      pushToast({ type: "error", title: "Erreur API", message: err.message });
+      pushToast({ type: "error", title: "Secteur", message: err.message });
     } finally {
       setLoading(false);
     }
@@ -122,7 +123,7 @@ export default function DetailSecteur() {
       </div>
 
       {loading ? (
-        <p>Chargement...</p>
+        <LogoLoader />
       ) : (
         <>
           <section className="stats-grid">

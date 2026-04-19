@@ -1,5 +1,5 @@
 import "./App.css"
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef } from "react";
 import { BrowserRouter,Routes,Route,Navigate } from "react-router-dom";
 import MainLayout from "./layouts/MainLayout";
 import DashboardPage from "./pages/dashboard/DashboardPage.jsx";
@@ -13,36 +13,65 @@ import ListeMateriels from "./pages/materiels/ListeMateriels.jsx";
 import LoginPage from "./pages/auth/LoginPage.jsx";
 import ProtectedRoute from "./routes/ProtectedRoute.jsx";
 import { apiGet } from "./api/axios.js";
+import { useToast } from "./context/ToastContext.jsx";
 
 
 export default function App(){
-  // Etat simple pour afficher une erreur API (ex: DB indisponible)
-  const [apiError, setApiError] = useState("");
+  const { pushToast, removeToast } = useToast();
+  const apiToastIdRef = useRef(null);
+  const apiWasDownRef = useRef(false);
+  const checkHealthRef = useRef(null);
 
   // Verifie que l'API est joignable au demarrage
-  const checkHealth = async () => {
+  const checkHealth = useCallback(async () => {
     try {
       await apiGet("/health/");
-      setApiError("");
+      if (apiToastIdRef.current) {
+        removeToast(apiToastIdRef.current);
+        apiToastIdRef.current = null;
+      }
+
+      if (apiWasDownRef.current) {
+        pushToast({
+          type: "success",
+          title: "Serveur",
+          message: "Connexion retablie",
+          duration: 2200,
+        });
+        apiWasDownRef.current = false;
+      }
     } catch (err) {
-      setApiError(err.message || "API indisponible");
+      apiWasDownRef.current = true;
+
+      // Un seul toast persistant tant que le serveur est KO
+      if (!apiToastIdRef.current) {
+        const id = pushToast({
+          type: "error",
+          title: "Serveur indisponible",
+          message: err.message || "Impossible de joindre le serveur",
+          duration: 0,
+          actionLabel: "Reessayer",
+          onAction: () => checkHealthRef.current?.(),
+          dismissOnAction: false,
+          onClose: () => {
+            apiToastIdRef.current = null;
+          },
+        });
+        apiToastIdRef.current = id;
+      }
     }
-  };
+  }, [pushToast, removeToast]);
+
+  useEffect(() => {
+    checkHealthRef.current = checkHealth;
+  }, [checkHealth]);
 
   useEffect(() => {
     checkHealth();
-  }, []);
+  }, [checkHealth]);
 
   return(
     <>
-      {/* Bandeau d'alerte si l'API est KO */}
-      {apiError && (
-        <div className="api-banner">
-          <strong>API indisponible :</strong> {apiError}
-          <button className="api-retry" onClick={checkHealth}>Reessayer</button>
-        </div>
-      )}
-
       <BrowserRouter>
         <Routes>
           {/* Route publique */}

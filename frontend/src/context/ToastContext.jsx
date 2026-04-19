@@ -15,25 +15,45 @@ export function ToastProvider({ children }) {
       type: "info", // info | success | error | warning
       title: "",
       message: "",
-      duration: 3000,
+      duration: 3000, // 0 => reste affiche jusqu'a fermeture manuelle
+      actionLabel: "",
+      onAction: null,
+      dismissOnAction: true,
+      onClose: null,
       ...toast,
     };
 
     setToasts((prev) => [...prev, next]);
 
     // Auto-dismiss
-    setTimeout(() => {
-      setToasts((prev) => prev.filter((t) => t.id !== id));
-    }, next.duration);
+    if (Number(next.duration) > 0) {
+      setTimeout(() => {
+      setToasts((prev) => {
+          const toastToRemove = prev.find((t) => t.id === id);
+          if (toastToRemove?.onClose) {
+            try { toastToRemove.onClose(); } catch { /* ignore */ }
+          }
+          return prev.filter((t) => t.id !== id);
+        });
+      }, next.duration);
+    }
+
+    return id;
   }, []);
 
   // Retire un toast manuellement
-  const removeToast = (id) => {
-    setToasts((prev) => prev.filter((t) => t.id !== id));
-  };
+  const removeToast = useCallback((id) => {
+    setToasts((prev) => {
+      const toastToRemove = prev.find((t) => t.id === id);
+      if (toastToRemove?.onClose) {
+        try { toastToRemove.onClose(); } catch { /* ignore */ }
+      }
+      return prev.filter((t) => t.id !== id);
+    });
+  }, []);
 
   return (
-    <ToastContext.Provider value={{ pushToast }}>
+    <ToastContext.Provider value={{ pushToast, removeToast }}>
       {children}
 
       {/* Zone d'affichage des toasts */}
@@ -42,6 +62,22 @@ export function ToastProvider({ children }) {
           <div key={t.id} className={`toast toast-${t.type}`}>
             {t.title && <strong>{t.title}</strong>}
             {t.message && <div>{t.message}</div>}
+            {t.actionLabel && typeof t.onAction === "function" && (
+              <div className="toast-actions">
+                <button
+                  className="toast-action"
+                  onClick={() => {
+                    try {
+                      t.onAction();
+                    } finally {
+                      if (t.dismissOnAction) removeToast(t.id);
+                    }
+                  }}
+                >
+                  {t.actionLabel}
+                </button>
+              </div>
+            )}
             <button className="toast-close" onClick={() => removeToast(t.id)}>
               x
             </button>
