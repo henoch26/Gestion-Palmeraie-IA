@@ -398,6 +398,17 @@ body {
   gap: 14px;
 }
 
+/* Recoltes > Analyses: 2 graphiques -> 2 colonnes (plein espace) */
+.fiche-analytics .charts-grid {
+  grid-template-columns: repeat(2, minmax(280px, 1fr));
+}
+
+@media (max-width: 1150px) {
+  .fiche-analytics .charts-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
 .chart-card {
   background: var(--white);
   border: 1px solid var(--border);
@@ -452,6 +463,16 @@ body {
   display: grid;
   grid-template-columns: repeat(2, minmax(260px, 1fr));
   gap: 14px;
+}
+
+/* Table unique (pleine largeur) */
+.tables-grid-full {
+  grid-template-columns: 1fr;
+}
+
+/* Recoltes > Analyses: 1 tableau -> pleine largeur */
+.fiche-analytics .tables-grid {
+  grid-template-columns: 1fr;
 }
 
 @media (max-width: 900px) {

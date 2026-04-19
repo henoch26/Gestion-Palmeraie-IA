@@ -16,6 +16,8 @@ export default function ListeRecolteurs() {
   const { pushToast } = useToast();
   const navigate = useNavigate();
 
+  const [tab, setTab] = useState("liste"); // liste | stats
+
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
 
@@ -183,7 +185,24 @@ export default function ListeRecolteurs() {
         </div>
       </div>
 
-      {loading ? <LogoLoader /> : <DataTable columns={columns} rows={rowsWithStatus} pageSize={5} />}
+      <div className="tabs" style={{ marginTop: 12 }}>
+        <button
+          className={`tab-btn ${tab === "liste" ? "active" : ""}`}
+          onClick={() => setTab("liste")}
+        >
+          Liste
+        </button>
+        <button
+          className={`tab-btn ${tab === "stats" ? "active" : ""}`}
+          onClick={() => setTab("stats")}
+        >
+          Statistiques
+        </button>
+      </div>
+
+      {tab === "liste" && (
+        loading ? <LogoLoader /> : <DataTable columns={columns} rows={rowsWithStatus} pageSize={5} />
+      )}
 
       <RecolteurDialog
         open={openForm}
@@ -207,36 +226,38 @@ export default function ListeRecolteurs() {
         onClose={() => setSuccess({ open: false, message: "" })}
       />
 
-      <section className="fiche-section fiche-analytics">
-        <div className="page-header-row">
-          <h3>Statistiques recolteurs ({statsYear})</h3>
-          <div className="row-actions">
-            <button className="btn-ghost" onClick={loadStats} disabled={loadingStats}>
-              {loadingStats ? "Chargement..." : "Rafraichir"}
-            </button>
+      {tab === "stats" && (
+        <section className="fiche-section fiche-analytics">
+          <div className="page-header-row">
+            <h3>Statistiques recolteurs ({statsYear})</h3>
+            <div className="row-actions">
+              <button className="btn-ghost" onClick={loadStats} disabled={loadingStats}>
+                {loadingStats ? "Chargement..." : "Rafraichir"}
+              </button>
+            </div>
           </div>
-        </div>
 
-        {loadingStats ? (
-          <LogoLoader compact size={70} />
-        ) : (
-          <DataTable
-            columns={[
-              { key: "code", label: "Code" },
-              { key: "nom", label: "Nom" },
-              { key: "lieu_residence", label: "Lieu" },
-              { key: "grands", label: "Grds" },
-              { key: "moyens", label: "Moy" },
-              { key: "petits", label: "Ptits" },
-              { key: "total_regimes", label: "Total" },
-              { key: "fiches_count", label: "Fiches" },
-              { key: "last_recolte", label: "Derniere recolte" },
-            ]}
-            rows={statsRows}
-            pageSize={8}
-          />
-        )}
-      </section>
+          {loadingStats ? (
+            <LogoLoader compact size={70} />
+          ) : (
+            <DataTable
+              columns={[
+                { key: "code", label: "Code" },
+                { key: "nom", label: "Nom" },
+                { key: "lieu_residence", label: "Lieu" },
+                { key: "grands", label: "Grds" },
+                { key: "moyens", label: "Moy" },
+                { key: "petits", label: "Ptits" },
+                { key: "total_regimes", label: "Total" },
+                { key: "fiches_count", label: "Fiches" },
+                { key: "last_recolte", label: "Derniere recolte" },
+              ]}
+              rows={statsRows}
+              pageSize={8}
+            />
+          )}
+        </section>
+      )}
     </div>
   );
 }

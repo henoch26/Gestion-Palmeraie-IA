@@ -5,10 +5,10 @@ export const ficheTravauxInitial = {
   natureTravaux: "",
   superficieCouverteHa: "",
   secteursCouverts: [],
-  periodeTravaux: "",
+  periodeTravauxDebut: "",
+  periodeTravauxFin: "",
   nbPersonnes: "",
   consommables: [],
   repartitions: [],
   observations: "",
 };
-

@@ -165,7 +165,7 @@ export default function DetailRecolteur() {
 
           <ChartDialog open={!!activeChart} chart={activeChart} onClose={() => setActiveChart(null)} />
 
-          <section className="tables-grid">
+          <section className="tables-grid tables-grid-full">
             <article className="table-card">
               <h3>Dernieres fiches ({data?.year})</h3>
               <DataTable
