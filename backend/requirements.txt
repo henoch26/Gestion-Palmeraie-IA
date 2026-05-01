@@ -5,3 +5,4 @@ psycopg2-binary==2.9.11
 sqlparse==0.5.5
 tzdata==2025.3
 django-cors-headers==4.4.0
+scikit-learn==1.6.1

@@ -1,3 +1,5 @@
+import re
+from datetime import date
 from decimal import Decimal
 
 from django.db import transaction
@@ -48,6 +50,8 @@ class RepartitionTacheSerializer(serializers.ModelSerializer):
 
 
 class FicheTravauxSerializer(serializers.ModelSerializer):
+    PERIODE_RE = re.compile(r"^\s*(\d{4}-\d{2}-\d{2})\s*-\s*(\d{4}-\d{2}-\d{2})\s*$")
+
     secteurs_couverts = serializers.PrimaryKeyRelatedField(
         queryset=Secteur.objects.all(), many=True, required=False
     )
@@ -60,9 +64,75 @@ class FicheTravauxSerializer(serializers.ModelSerializer):
     class Meta:
         model = FicheTravaux
         fields = "__all__"
+        extra_kwargs = {
+            "superviseur_travaux": {"required": True, "allow_blank": False},
+            "nature_travaux": {"required": True, "allow_blank": False},
+            "periode_travaux": {"required": True, "allow_blank": False},
+        }
 
     def get_secteurs_couverts_codes(self, obj):
         return list(obj.secteurs_couverts.all().values_list("code", flat=True))
+
+    def validate(self, attrs):
+        # Champs obligatoires (creation) + nettoyage simple
+        if self.instance is None or "superviseur_travaux" in attrs:
+            superviseur = str(attrs.get("superviseur_travaux") or "").strip()
+            if not superviseur:
+                raise serializers.ValidationError(
+                    {"superviseur_travaux": "Superviseur des travaux requis"}
+                )
+            attrs["superviseur_travaux"] = superviseur
+
+        if self.instance is None or "nature_travaux" in attrs:
+            nature = str(attrs.get("nature_travaux") or "").strip()
+            if not nature:
+                raise serializers.ValidationError(
+                    {"nature_travaux": "Nature des travaux requise"}
+                )
+            attrs["nature_travaux"] = nature
+
+        if self.instance is None or "periode_travaux" in attrs:
+            periode = str(attrs.get("periode_travaux") or "").strip()
+            if not periode:
+                raise serializers.ValidationError({"periode_travaux": "Periode requise"})
+
+            m = self.PERIODE_RE.match(periode)
+            if not m:
+                raise serializers.ValidationError(
+                    {"periode_travaux": "Format attendu: AAAA-MM-JJ - AAAA-MM-JJ"}
+                )
+
+            start_s, end_s = m.groups()
+            try:
+                start = date.fromisoformat(start_s)
+                end = date.fromisoformat(end_s)
+            except ValueError as exc:
+                raise serializers.ValidationError(
+                    {"periode_travaux": f"Dates invalides: {exc}"}
+                ) from exc
+
+            if start > end:
+                raise serializers.ValidationError(
+                    {"periode_travaux": "La date fin doit etre >= date debut"}
+                )
+
+            # Canonicalise l'affichage
+            attrs["periode_travaux"] = f"{start.isoformat()} - {end.isoformat()}"
+
+        secteurs = attrs.get("secteurs_couverts", None)
+        if self.instance is None:
+            if not secteurs:
+                raise serializers.ValidationError(
+                    {"secteurs_couverts": "Selectionne au moins un secteur"}
+                )
+        else:
+            # En update, si fourni, il doit contenir au moins 1 secteur
+            if secteurs is not None and len(secteurs) == 0:
+                raise serializers.ValidationError(
+                    {"secteurs_couverts": "Selectionne au moins un secteur"}
+                )
+
+        return attrs
 
     def get_total_cout(self, obj):
         total = Decimal("0.00")
@@ -114,4 +184,3 @@ class FicheTravauxSerializer(serializers.ModelSerializer):
                 RepartitionTache.objects.create(fiche=instance, **r)
 
         return instance
-

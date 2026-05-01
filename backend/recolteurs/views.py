@@ -8,10 +8,13 @@ from django.utils import timezone
 from rest_framework import viewsets
 from rest_framework.decorators import action
 from rest_framework.response import Response
+from rest_framework import status
+from rest_framework.parsers import FormParser, MultiPartParser
 
 from recoltes.models import FicheRecolte, FicheRecolteDetail, FicheRecolteLigne
 from .models import Recolteur
 from .serializers import RecolteurSerializer
+from utils.csv_utils import clean_str, csv_template_response, read_uploaded_csv
 
 
 class RecolteurViewSet(viewsets.ModelViewSet):
@@ -379,3 +382,56 @@ class RecolteurViewSet(viewsets.ModelViewSet):
             )
 
         return response
+
+    @action(detail=False, methods=["get"], url_path="template")
+    def template(self, request):
+        return csv_template_response(
+            "recolteurs_template.csv",
+            fieldnames=["code", "nom", "lieu_residence"],
+            example_rows=[{"code": "REC-001", "nom": "A. Konan", "lieu_residence": "Grand-Palmeraie"}],
+        )
+
+    @action(
+        detail=False,
+        methods=["post"],
+        url_path="import",
+        parser_classes=[MultiPartParser, FormParser],
+    )
+    def import_csv(self, request):
+        f = request.FILES.get("file")
+        if not f:
+            return Response({"detail": "Fichier requis (champ 'file')"}, status=status.HTTP_400_BAD_REQUEST)
+
+        rows = read_uploaded_csv(f)
+        created = 0
+        updated = 0
+        errors = []
+
+        for idx, row in enumerate(rows, start=2):
+            code = clean_str(row.get("code"))
+            nom = clean_str(row.get("nom"))
+            lieu = clean_str(row.get("lieu_residence"))
+
+            if not nom:
+                errors.append({"line": idx, "error": "nom requis"})
+                continue
+            if not lieu:
+                errors.append({"line": idx, "error": "lieu_residence requis"})
+                continue
+
+            obj = None
+            if code:
+                obj = Recolteur.objects.filter(code=code).first()
+            if not obj:
+                obj = Recolteur.objects.filter(nom__iexact=nom).first()
+
+            if obj:
+                obj.nom = nom
+                obj.lieu_residence = lieu
+                obj.save()
+                updated += 1
+            else:
+                Recolteur.objects.create(code=code or None, nom=nom, lieu_residence=lieu)
+                created += 1
+
+        return Response({"ok": True, "created": created, "updated": updated, "errors": errors})

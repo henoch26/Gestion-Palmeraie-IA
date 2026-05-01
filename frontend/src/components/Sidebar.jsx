@@ -30,6 +30,9 @@ export default function Sidebar({ isNavigating = false }) {
         <NavLink to="/recoltes" className={({ isActive }) => (isActive ? "active" : "")}>Recoltes</NavLink>
         <NavLink to="/travaux" className={({ isActive }) => (isActive ? "active" : "")}>Travaux</NavLink>
         <NavLink to="/materiels" className={({ isActive }) => (isActive ? "active" : "")}>Materiels</NavLink>
+        <NavLink to="/paiements" className={({ isActive }) => (isActive ? "active" : "")}>Paiements</NavLink>
+        <NavLink to="/ia" className={({ isActive }) => (isActive ? "active" : "")}>IA</NavLink>
+        <NavLink to="/import" className={({ isActive }) => (isActive ? "active" : "")}>Import</NavLink>
       </nav>
 
       {/* Zone info (placeholder) */}

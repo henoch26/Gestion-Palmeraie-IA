@@ -715,6 +715,20 @@ body {
   border-radius: var(--radius-sm);
 }
 
+.checkbox-inline {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: #fff;
+}
+
+.checkbox-inline input {
+  margin: 0;
+}
+
 /* Badges */
 .badge {
   padding: 2px 8px;

@@ -47,6 +47,8 @@ INSTALLED_APPS = [
     'recolteurs',
     'travaux',
     'materiels',
+    'paiements',
+    'ia',
 
 ]
 
