@@ -1,5 +1,4 @@
 import csv
-import io
 
 from django.http import HttpResponse
 from django.db.models import Sum, Max
@@ -8,14 +7,11 @@ from django.utils import timezone
 from rest_framework import viewsets
 from rest_framework.decorators import action
 from rest_framework.response import Response
-from rest_framework import status
-from rest_framework.parsers import FormParser, MultiPartParser
 
 from .models import Secteur
 from .serializers import SecteurSerializer
 from recoltes.models import FicheRecolte, FicheRecolteDetail
 from recolteurs.models import Recolteur
-from utils.csv_utils import csv_template_response, parse_decimal, clean_str, read_uploaded_csv
 
 
 class SecteurViewSet(viewsets.ModelViewSet):
@@ -57,80 +53,6 @@ class SecteurViewSet(viewsets.ModelViewSet):
             )
 
         return response
-
-    @action(detail=False, methods=["get"], url_path="template")
-    def template(self, request):
-        # Modele CSV d'import
-        return csv_template_response(
-            "secteurs_template.csv",
-            fieldnames=["code", "nom", "superficie_ha", "situation_relief", "type_sol"],
-            example_rows=[
-                {
-                    "code": "GP_1",
-                    "nom": "GP 1",
-                    "superficie_ha": "7.47",
-                    "situation_relief": "Plateau",
-                    "type_sol": "Sableux / Argileux",
-                }
-            ],
-        )
-
-    @action(
-        detail=False,
-        methods=["post"],
-        url_path="import",
-        parser_classes=[MultiPartParser, FormParser],
-    )
-    def import_csv(self, request):
-        # Import CSV (creation ou mise a jour)
-        f = request.FILES.get("file")
-        if not f:
-            return Response({"detail": "Fichier requis (champ 'file')"}, status=status.HTTP_400_BAD_REQUEST)
-
-        rows = read_uploaded_csv(f)
-        created = 0
-        updated = 0
-        errors = []
-
-        for idx, row in enumerate(rows, start=2):  # header=1
-            code = clean_str(row.get("code"))
-            nom = clean_str(row.get("nom"))
-            superficie = parse_decimal(row.get("superficie_ha"))
-            situation_relief = clean_str(row.get("situation_relief"))
-            type_sol = clean_str(row.get("type_sol"))
-
-            if not nom:
-                errors.append({"line": idx, "error": "nom requis"})
-                continue
-            if superficie is None:
-                errors.append({"line": idx, "error": "superficie_ha requise (nombre)"})
-                continue
-
-            secteur = None
-            if code:
-                secteur = Secteur.objects.filter(code=code).first()
-            if not secteur:
-                secteur = Secteur.objects.filter(nom__iexact=nom).first()
-
-            if secteur:
-                # MAJ
-                secteur.nom = nom
-                secteur.superficie_ha = superficie
-                secteur.situation_relief = situation_relief
-                secteur.type_sol = type_sol
-                secteur.save()
-                updated += 1
-            else:
-                Secteur.objects.create(
-                    code=code or "",
-                    nom=nom,
-                    superficie_ha=superficie,
-                    situation_relief=situation_relief,
-                    type_sol=type_sol,
-                )
-                created += 1
-
-        return Response({"ok": True, "created": created, "updated": updated, "errors": errors})
 
     @action(detail=True, methods=["get"], url_path="analytics")
     def analytics(self, request, pk=None):

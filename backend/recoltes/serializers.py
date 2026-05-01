@@ -7,7 +7,6 @@ from .models import (
     FicheRecolteDetail,
     FicheRecuVente,
 )
-from paiements.services import sync_paiements_for_fiche
 
 
 class SuperviseurAdjointSerializer(serializers.ModelSerializer):
@@ -192,19 +191,10 @@ class FicheRecolteSerializer(serializers.ModelSerializer):
                 continue
             FicheRecuVente.objects.create(fiche=fiche, **recu)
 
-        # Sync paiements (montants par recolteur) a partir des lignes/details
-        sync_paiements_for_fiche(fiche)
-
         return fiche
 
     @transaction.atomic
     def update(self, instance, validated_data):
-        # Interdit toute modification si au moins un paiement associe est deja paye
-        if instance.paiements.filter(statut="paye").exists():
-            raise serializers.ValidationError(
-                {"detail": "Fiche deja payee: modification interdite"}
-            )
-
         superviseurs_data = validated_data.pop("superviseurs_adjoints", None)
         lignes_data = validated_data.pop("lignes", None)
         recus_data = validated_data.pop("recus", None)
@@ -255,8 +245,5 @@ class FicheRecolteSerializer(serializers.ModelSerializer):
                 if is_empty:
                     continue
                 FicheRecuVente.objects.create(fiche=instance, **recu)
-
-        # Recalcule les paiements apres modification des lignes/details
-        sync_paiements_for_fiche(instance)
 
         return instance

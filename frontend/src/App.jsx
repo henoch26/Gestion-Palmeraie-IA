@@ -10,9 +10,6 @@ import DetailRecolteur from "./pages/recolteurs/DetailRecolteur.jsx";
 import HistoriqueRecoltes from "./pages/recoltes/HistoriqueRecoltes.jsx";
 import HistoriqueTravaux from "./pages/travaux/HistoriqueTravaux.jsx";
 import ListeMateriels from "./pages/materiels/ListeMateriels.jsx";
-import PaiementsPage from "./pages/paiements/PaiementsPage.jsx";
-import IAPage from "./pages/ia/IAPage.jsx";
-import ImportPage from "./pages/import/ImportPage.jsx";
 import LoginPage from "./pages/auth/LoginPage.jsx";
 import ProtectedRoute from "./routes/ProtectedRoute.jsx";
 import { apiGet } from "./api/axios.js";
@@ -92,9 +89,6 @@ export default function App(){
             <Route path="/recoltes" element={<HistoriqueRecoltes  />}/>
             <Route path="/travaux" element={<HistoriqueTravaux  />}/>
             <Route path="/materiels" element={<ListeMateriels  />}/>
-            <Route path="/paiements" element={<PaiementsPage />}/>
-            <Route path="/ia" element={<IAPage />}/>
-            <Route path="/import" element={<ImportPage />}/>
           </Route>
         </Route>
 

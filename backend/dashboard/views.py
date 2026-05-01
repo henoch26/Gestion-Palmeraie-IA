@@ -58,7 +58,7 @@ def summary_view(request):
         fiches_recolte_qs = fiches_recolte_qs.filter(lignes__regime_type=regime_type)
     fiches_recolte_qs = fiches_recolte_qs.distinct()
 
-    # Stats globales (dashboard = synthese, sans IA ni paiement)
+    # Stats globales du dashboard
     secteurs_count_total = Secteur.objects.count()
 
     # KPIs sur l'annee selectionnee (et filtres eventuels)

@@ -5,10 +5,4 @@ export const endpoints = {
   recoltes: "/recoltes/",
   travaux: "/travaux/",
   materiels: "/materiels/",
-  paiements: "/paiements/",
-  iaSummary: "/ia/summary/",
-  iaAdvanced: "/ia/advanced/",
-  iaFacteursProduction: "/ia/facteurs-production/",
-  iaAnomalies: "/ia/anomalies/",
-  iaPredictions: "/ia/predictions/",
 };
