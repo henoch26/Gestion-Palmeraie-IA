@@ -10,6 +10,7 @@ For the full list of settings and their values, see
 https://docs.djangoproject.com/en/5.2/ref/settings/
 """
 
+import os
 from pathlib import Path
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
@@ -40,6 +41,7 @@ INSTALLED_APPS = [
     'rest_framework',
     'rest_framework.authtoken',
     'corsheaders',
+    'django_crontab',
     'dashboard',
     'recoltes',
     'secteurs',
@@ -47,7 +49,6 @@ INSTALLED_APPS = [
     'recolteurs',
     'travaux',
     'materiels',
-
 ]
 
 MIDDLEWARE = [
@@ -132,8 +133,32 @@ USE_TZ = True
 
 STATIC_URL = 'static/'
 
+# Fichiers média (photos personnel, etc.)
+import os
+MEDIA_URL = '/media/'
+MEDIA_ROOT = os.path.join(BASE_DIR, 'media')
+
 # CORS (dev)
 CORS_ALLOW_ALL_ORIGINS = True
+
+# Tâches périodiques (django-crontab) — exécuter check_alerts tous les jours à 06h00
+CRONJOBS = [
+    ('0 6 * * *', 'django.core.management.call_command', ['check_alerts']),
+]
+
+# Email — utilise Gmail SMTP si EMAIL_HOST_USER est défini, sinon affiche dans la console
+_email_user = os.environ.get("EMAIL_HOST_USER", "")
+if _email_user:
+    EMAIL_BACKEND = "django.core.mail.backends.smtp.EmailBackend"
+    EMAIL_HOST = "smtp.gmail.com"
+    EMAIL_PORT = 587
+    EMAIL_USE_TLS = True
+    EMAIL_HOST_USER = _email_user
+    EMAIL_HOST_PASSWORD = os.environ.get("EMAIL_HOST_PASSWORD", "")
+    DEFAULT_FROM_EMAIL = f"Palmeraie <{_email_user}>"
+else:
+    EMAIL_BACKEND = "django.core.mail.backends.console.EmailBackend"
+    DEFAULT_FROM_EMAIL = "palmeraie@example.com"
 
 # DRF
 REST_FRAMEWORK = {

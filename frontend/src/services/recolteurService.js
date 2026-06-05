@@ -1,14 +1,24 @@
 import { apiDelete, apiGet, apiPost, apiPut } from "../api/axios.js";
 import { endpoints } from "../api/endpoints.js";
 
-// CRUD recolteurs
-export const listRecolteurs = () => apiGet(endpoints.recolteurs);
-export const createRecolteur = (payload) => apiPost(endpoints.recolteurs, payload);
-export const updateRecolteur = (id, payload) => apiPut(`${endpoints.recolteurs}${id}/`, payload);
-export const deleteRecolteur = (id) => apiDelete(`${endpoints.recolteurs}${id}/`);
+const BASE = endpoints.personnel;
 
-// Analytics
+// CRUD personnel (anciennement recolteurs)
+export const listRecolteurs = () => apiGet(BASE);
+export const listPersonnel = () => apiGet(BASE);
+export const createRecolteur = (payload) => apiPost(BASE, payload);
+export const createPersonnel = (payload) => apiPost(BASE, payload);
+export const updateRecolteur = (id, payload) => apiPut(`${BASE}${id}/`, payload);
+export const updatePersonnel = (id, payload) => apiPut(`${BASE}${id}/`, payload);
+export const deleteRecolteur = (id) => apiDelete(`${BASE}${id}/`);
+export const deletePersonnel = (id) => apiDelete(`${BASE}${id}/`);
+
+// Analytics & stats
 export const getRecolteursStats = (year) =>
-  apiGet(`${endpoints.recolteurs}stats/${year ? `?year=${encodeURIComponent(year)}` : ""}`);
+  apiGet(`${BASE}stats/${year ? `?year=${encodeURIComponent(year)}` : ""}`);
+export const getPersonnelStats = (year) =>
+  apiGet(`${BASE}stats/${year ? `?year=${encodeURIComponent(year)}` : ""}`);
 export const getRecolteurAnalytics = (id, year) =>
-  apiGet(`${endpoints.recolteurs}${id}/analytics/${year ? `?year=${encodeURIComponent(year)}` : ""}`);
+  apiGet(`${BASE}${id}/analytics/${year ? `?year=${encodeURIComponent(year)}` : ""}`);
+export const getPersonnelAnalytics = (id, year) =>
+  apiGet(`${BASE}${id}/analytics/${year ? `?year=${encodeURIComponent(year)}` : ""}`);

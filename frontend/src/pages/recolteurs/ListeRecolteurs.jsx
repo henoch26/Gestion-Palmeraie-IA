@@ -46,9 +46,22 @@ export default function ListeRecolteurs() {
   });
 
   const columns = [
-    { key: "code", label: "Code" },
+    { key: "numero_telephone", label: "Telephone" },
     { key: "nom", label: "Nom" },
     { key: "lieu_residence", label: "Lieu de residence" },
+    {
+      key: "paiement",
+      label: "Paiement mobile",
+      render: (row) => (
+        <span style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
+          {row.est_wave && <span className="badge badge-info">Wave</span>}
+          {row.est_mobile_money && (
+            <span className="badge badge-success">{row.operateur_mm_display || "MoMo"}</span>
+          )}
+          {!row.est_wave && !row.est_mobile_money && <span className="muted">—</span>}
+        </span>
+      ),
+    },
     {
       key: "statut",
       label: `Statut (${statsYear})`,
@@ -139,6 +152,12 @@ export default function ListeRecolteurs() {
       const payload = {
         nom: form.nom,
         lieu_residence: form.lieu_residence,
+        numero_telephone: form.numero_telephone,
+        numero_whatsapp: form.numero_whatsapp,
+        whatsapp_actif: form.whatsapp_actif,
+        est_wave: form.est_wave,
+        est_mobile_money: form.est_mobile_money,
+        operateur_mm: form.operateur_mm,
       };
 
       if (editing) {
@@ -242,7 +261,7 @@ export default function ListeRecolteurs() {
           ) : (
             <DataTable
               columns={[
-                { key: "code", label: "Code" },
+                { key: "numero_telephone", label: "Telephone" },
                 { key: "nom", label: "Nom" },
                 { key: "lieu_residence", label: "Lieu" },
                 { key: "grands", label: "Grds" },

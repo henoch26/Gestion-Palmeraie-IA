@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "PowerShell(Get-ChildItem -Path \"e:\\\\UFHB\\\\MASTER2_BDGL\\\\Projet_Memoire\\\\theme2\\\\Projet_Gestion_Palmeraie\\\\frontend\" -Recurse -Force | Where-Object {-not $_.PSIsContainer} | Select-Object FullName | Format-Table -AutoSize)",
+      "PowerShell(Get-ChildItem -Path \"e:\\\\UFHB\\\\MASTER2_BDGL\\\\Projet_Memoire\\\\theme2\\\\Projet_Gestion_Palmeraie\\\\backend\" -Exclude venv -Directory | ForEach-Object { Get-ChildItem -Path $_.FullName -Depth 0 } | Select-Object Name, BaseName | Where-Object {$_.Name -notmatch \"^\\(venv|__pycache__|\\\\.git\\)\"})",
+      "PowerShell(Get-ChildItem -Path \"e:\\\\UFHB\\\\MASTER2_BDGL\\\\Projet_Memoire\\\\theme2\\\\Projet_Gestion_Palmeraie\\\\backend\" -Exclude \"venv\" | Format-Table Name, @{Label=\"Type\";Expression={if\\($_.PSIsContainer\\){\"DIR\"}else{\"FILE\"}}} -AutoSize)",
+      "PowerShell(Get-ChildItem -Path \"e:\\\\UFHB\\\\MASTER2_BDGL\\\\Projet_Memoire\\\\theme2\\\\Projet_Gestion_Palmeraie\\\\backend\\\\accounts\" | Format-Table Name, @{Label=\"Type\";Expression={if\\($_.PSIsContainer\\){\"DIR\"}else{\"FILE\"}}} -AutoSize)"
+    ]
+  }
+}

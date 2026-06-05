@@ -6,7 +6,8 @@ import {
 } from "../../data/ficheRecolteData.js";
 import { useToast } from "../../context/ToastContext.jsx";
 import { listSecteurs } from "../../services/secteurService.js";
-import { createFiche, getRecoltesAnalytics, listFiches } from "../../services/recolteService.js";
+import { createFiche, getRecoltesAnalytics, listFiches, patchFiche } from "../../services/recolteService.js";
+import { useAuth } from "../../context/AuthContext.jsx";
 import { listRecolteurs } from "../../services/recolteurService.js";
 import DataTable from "../../components/DataTable.jsx";
 import LogoLoader from "../../components/LogoLoader.jsx";
@@ -15,6 +16,8 @@ import ChartCard from "../../components/ChartCard.jsx";
 import ChartDialog from "../../components/ChartDialog.jsx";
 import SuccessDialog from "../../components/SuccessDialog.jsx";
 import SearchableSelect from "../../components/SearchableSelect.jsx";
+import ClientSelect from "../../components/ClientSelect.jsx";
+import { listClients } from "../../services/clientService.js";
 import { getToken } from "../../services/authService.js";
 
 const API_BASE = import.meta.env.VITE_API_URL || "http://127.0.0.1:8000/api";
@@ -22,6 +25,7 @@ const API_BASE = import.meta.env.VITE_API_URL || "http://127.0.0.1:8000/api";
 // Page Fiche de recolte (format papier)
 export default function HistoriqueRecoltes() {
   const { pushToast } = useToast();
+  const { isAdmin, isSuperviseur } = useAuth();
 
   const [tab, setTab] = useState("saisie"); // saisie | analyses | historique
 
@@ -36,6 +40,7 @@ export default function HistoriqueRecoltes() {
     secteurCodes.map((s) => s.code)
   );
   const [recolteursList, setRecolteursList] = useState([]);
+  const [clientsList, setClientsList] = useState([]);
   const [history, setHistory] = useState([]);
   const [loadingHistory, setLoadingHistory] = useState(false);
   const [historyLoaded, setHistoryLoaded] = useState(false);
@@ -123,7 +128,7 @@ export default function HistoriqueRecoltes() {
     }));
     const recs = (recolteursList || []).map((r) => ({
       value: r.nom,
-      label: `${r.code ? `${r.code} - ` : ""}${r.nom}`,
+      label: `${r.numero_telephone ? `${r.numero_telephone} - ` : ""}${r.nom}`,
       group: "Recolteurs",
     }));
     return [...secs, ...recs];
@@ -147,12 +152,13 @@ export default function HistoriqueRecoltes() {
       0
     );
 
-  // Total depenses (nourriture + transport)
+  // Total dépenses = nourriture + transport + salaire
   const totalDepenses = useMemo(() => {
     const n = Number(fiche.depenses.nourriture) || 0;
     const t = Number(fiche.depenses.transport) || 0;
-    return n + t;
-  }, [fiche.depenses.nourriture, fiche.depenses.transport]);
+    const s = Number(fiche.depenses.salaire) || 0;
+    return n + t + s;
+  }, [fiche.depenses.nourriture, fiche.depenses.transport, fiche.depenses.salaire]);
 
   const analyticsYears = useMemo(() => {
     const y = new Date().getFullYear();
@@ -186,6 +192,15 @@ export default function HistoriqueRecoltes() {
     }
   };
 
+  const loadClients = async () => {
+    try {
+      const data = await listClients();
+      setClientsList(data || []);
+    } catch (err) {
+      // Silencieux — la liste déroulante reste vide mais la saisie libre fonctionne
+    }
+  };
+
   const loadAnalytics = async (year = analyticsYear) => {
     try {
       setLoadingAnalytics(true);
@@ -202,6 +217,7 @@ export default function HistoriqueRecoltes() {
   useEffect(() => {
     loadSecteurs();
     loadRecolteurs();
+    loadClients();
   }, []);
 
   useEffect(() => {
@@ -515,6 +531,7 @@ export default function HistoriqueRecoltes() {
       bareme_petits: Number(fiche.bareme.petits) || 0,
       depense_nourriture: Number(fiche.depenses.nourriture) || 0,
       depense_transport: Number(fiche.depenses.transport) || 0,
+      depense_salaire: Number(fiche.depenses.salaire) || 0,
       observations: fiche.observations || "",
       superviseurs_adjoints,
       lignes,
@@ -573,6 +590,19 @@ export default function HistoriqueRecoltes() {
       pushToast({ type: "error", title: "Recoltes", message: err.message });
     } finally {
       setLoadingHistory(false);
+    }
+  };
+
+  const handleStatutChange = async (ficheId, newStatut) => {
+    try {
+      await patchFiche(ficheId, { statut: newStatut });
+      setHistory((prev) =>
+        prev.map((f) => (f.id === ficheId ? { ...f, statut: newStatut } : f))
+      );
+      const labels = { soumis: "soumise", valide: "validee", brouillon: "rejetee" };
+      pushToast({ type: "success", title: "Fiche", message: `Fiche ${labels[newStatut] || newStatut}` });
+    } catch (err) {
+      pushToast({ type: "error", title: "Statut", message: err.message });
     }
   };
 
@@ -636,17 +666,51 @@ export default function HistoriqueRecoltes() {
       render: (row) => row.superviseur_general || "-",
     },
     { key: "total_regimes", label: "Total regimes" },
-    { key: "total_prix", label: "Prix recolte" },
     { key: "nb_recolteurs", label: "Recolteurs" },
     { key: "nb_recus", label: "Recus" },
     {
+      key: "statut",
+      label: "Statut",
+      render: (row) => {
+        const s = row.statut || "brouillon";
+        return <span className={`statut-badge statut-${s}`}>{row.statut_display || s}</span>;
+      },
+    },
+    {
       key: "actions",
       label: "Actions",
-      render: (row) => (
-        <div className="row-actions">
-          <button onClick={() => setSelectedFiche(row)}>Voir</button>
-        </div>
-      ),
+      render: (row) => {
+        const s = row.statut || "brouillon";
+        return (
+          <div className="row-actions">
+            <button onClick={() => setSelectedFiche(row)}>Voir</button>
+            {s === "brouillon" && (isSuperviseur || isAdmin) && (
+              <button
+                className="btn-warning btn-sm"
+                onClick={() => handleStatutChange(row.id, "soumis")}
+              >
+                Soumettre
+              </button>
+            )}
+            {s === "soumis" && isAdmin && (
+              <>
+                <button
+                  className="btn-primary btn-sm"
+                  onClick={() => handleStatutChange(row.id, "valide")}
+                >
+                  Valider
+                </button>
+                <button
+                  className="btn-ghost btn-sm"
+                  onClick={() => handleStatutChange(row.id, "brouillon")}
+                >
+                  Rejeter
+                </button>
+              </>
+            )}
+          </div>
+        );
+      },
     },
   ];
 
@@ -912,7 +976,7 @@ export default function HistoriqueRecoltes() {
                             value={r.nom}
                             options={(recolteursList || []).map((x) => ({
                               value: x.nom,
-                              label: `${x.code ? `${x.code} - ` : ""}${x.nom}`,
+                              label: `${x.numero_telephone ? `${x.numero_telephone} - ` : ""}${x.nom}`,
                               group: "",
                             }))}
                             onChange={(v) => handleRecolteurName(r.id, v)}
@@ -979,6 +1043,7 @@ export default function HistoriqueRecoltes() {
             Nourriture
             <input
               type="number"
+              min="0"
               className="fiche-input"
               value={fiche.depenses.nourriture}
               onChange={(e) => handleDepenseChange("nourriture", e.target.value)}
@@ -988,14 +1053,30 @@ export default function HistoriqueRecoltes() {
             Transport
             <input
               type="number"
+              min="0"
               className="fiche-input"
               value={fiche.depenses.transport}
               onChange={(e) => handleDepenseChange("transport", e.target.value)}
             />
           </label>
           <label>
-            Total
-            <input className="fiche-input" value={totalDepenses} readOnly />
+            Salaire recolteurs
+            <input
+              type="number"
+              min="0"
+              className="fiche-input"
+              value={fiche.depenses.salaire}
+              onChange={(e) => handleDepenseChange("salaire", e.target.value)}
+            />
+          </label>
+          <label>
+            Total depenses
+            <input
+              className="fiche-input"
+              value={totalDepenses.toLocaleString("fr-FR")}
+              readOnly
+              style={{ fontWeight: 700, background: "#f5f5f5" }}
+            />
           </label>
         </div>
       </section>
@@ -1036,10 +1117,14 @@ export default function HistoriqueRecoltes() {
               </label>
               <label>
                 Client
-                <input
-                  className="fiche-input"
+                <ClientSelect
                   value={r.client}
-                  onChange={(e) => handleRecuChange(r.id, "client", e.target.value)}
+                  clients={clientsList}
+                  isAdmin={isAdmin}
+                  onChange={(val) => handleRecuChange(r.id, "client", val)}
+                  onClientAdded={(newClient) =>
+                    setClientsList((prev) => [...prev, newClient].sort((a, b) => a.nom.localeCompare(b.nom)))
+                  }
                 />
               </label>
               <label>
@@ -1185,7 +1270,7 @@ export default function HistoriqueRecoltes() {
                 <h3>Statistiques recolteurs</h3>
                 <DataTable
                   columns={[
-                    { key: "code", label: "Code" },
+                    { key: "numero_telephone", label: "Telephone" },
                     { key: "nom", label: "Nom" },
                     { key: "lieu_residence", label: "Lieu" },
                     { key: "grands", label: "Grds" },

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import ChartCard from "./ChartCard.jsx";
 import useBodyScrollLock from "../utils/useBodyScrollLock.js";
 
@@ -7,6 +7,16 @@ export default function ChartDialog({ open, onClose, chart }) {
   const [instance, setInstance] = useState(null);
 
   useBodyScrollLock(!!open);
+
+  const chartOptions = useMemo(
+    () => ({
+      responsive: true,
+      maintainAspectRatio: false,
+      layout: { padding: { bottom: 18 } },
+      ...(chart?.options || {}),
+    }),
+    [chart]
+  );
 
   if (!open || !chart) return null;
 
@@ -73,12 +83,7 @@ export default function ChartDialog({ open, onClose, chart }) {
           title={chart.title}
           type={chart.type}
           data={chart.data}
-          options={{
-            responsive: true,
-            maintainAspectRatio: false,
-            layout: { padding: { bottom: 18 } },
-            ...(chart.options || {}),
-          }}
+          options={chartOptions}
           onChartReady={setInstance}
         />
       </div>

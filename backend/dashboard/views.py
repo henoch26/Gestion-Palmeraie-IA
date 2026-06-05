@@ -1,4 +1,5 @@
 from datetime import date
+from decimal import Decimal
 
 from django.db.models import F, Q, Sum, DecimalField, Value
 from django.db.models.expressions import ExpressionWrapper
@@ -7,8 +8,8 @@ from rest_framework.decorators import api_view
 from rest_framework.response import Response
 
 from materiels.models import MaterielEquipement
-from recoltes.models import FicheRecolte, FicheRecolteDetail, FicheRecuVente
-from recolteurs.models import Recolteur
+from recoltes.models import FicheRecolte, FicheRecolteDetail, FicheRecuVente, FicheRecolteLigne
+from recolteurs.models import Personnel
 from secteurs.models import Secteur
 from travaux.models import FicheTravaux, ConsommableTravaux, RepartitionTache
 
@@ -18,6 +19,7 @@ def summary_view(request):
     today = date.today()
     selected_year = int(request.query_params.get("year", today.year))
     prev_year = selected_year - 1
+    prev2_year = selected_year - 2
 
     secteur_id = request.query_params.get("secteur")
     recolteur_id = request.query_params.get("recolteur")
@@ -31,15 +33,14 @@ def summary_view(request):
         if secteur_id:
             secteur_obj = Secteur.objects.filter(id=int(secteur_id)).first()
     except Exception:
-        secteur_obj = None
-
+        pass
     try:
         if recolteur_id:
-            recolteur_obj = Recolteur.objects.filter(id=int(recolteur_id)).first()
+            recolteur_obj = Personnel.objects.filter(id=int(recolteur_id)).first()
     except Exception:
-        recolteur_obj = None
+        pass
 
-    # Base details queryset (filtrable)
+    # ── Base querysets (filtrables) ──────────────────────────────────────────
     details_qs = FicheRecolteDetail.objects.all()
     if secteur_obj:
         details_qs = details_qs.filter(secteur=secteur_obj)
@@ -48,7 +49,6 @@ def summary_view(request):
     if regime_type:
         details_qs = details_qs.filter(ligne__regime_type=regime_type)
 
-    # Base fiches recolte (pour depenses/recus, filtrable via existence de details/lignes)
     fiches_recolte_qs = FicheRecolte.objects.all()
     if secteur_obj:
         fiches_recolte_qs = fiches_recolte_qs.filter(lignes__details__secteur=secteur_obj)
@@ -58,62 +58,52 @@ def summary_view(request):
         fiches_recolte_qs = fiches_recolte_qs.filter(lignes__regime_type=regime_type)
     fiches_recolte_qs = fiches_recolte_qs.distinct()
 
-    # Stats globales du dashboard
+    # ── KPIs année sélectionnée ───────────────────────────────────────────────
     secteurs_count_total = Secteur.objects.count()
+    secteurs_actifs = Secteur.objects.filter(statut="actif").count()
 
-    # KPIs sur l'annee selectionnee (et filtres eventuels)
-    total_production = (
-        details_qs.filter(ligne__fiche__date__year=selected_year).aggregate(total=Sum("quantite"))["total"]
-        or 0
+    total_production = int(
+        details_qs.filter(ligne__fiche__date__year=selected_year).aggregate(total=Sum("quantite"))["total"] or 0
     )
-
     secteurs_involved = (
         details_qs.filter(ligne__fiche__date__year=selected_year)
-        .values("secteur")
-        .exclude(secteur__isnull=True)
-        .distinct()
-        .count()
+        .values("secteur").exclude(secteur__isnull=True).distinct().count()
     )
-
     recolteurs_actifs = (
         details_qs.filter(ligne__fiche__date__year=selected_year)
-        .values("ligne__recolteur")
-        .exclude(ligne__recolteur__isnull=True)
-        .distinct()
-        .count()
+        .values("ligne__recolteur").exclude(ligne__recolteur__isnull=True).distinct().count()
     )
 
-    # Rendement moyen (regimes/ha) base sur la superficie totale des secteurs concernes
+    # Rendement moyen régimes/ha
     secteur_ids_for_year = (
         details_qs.filter(ligne__fiche__date__year=selected_year)
-        .values_list("secteur", flat=True)
-        .exclude(secteur__isnull=True)
-        .distinct()
+        .values_list("secteur", flat=True).exclude(secteur__isnull=True).distinct()
     )
-    superficie_totale = (
-        Secteur.objects.filter(id__in=secteur_ids_for_year).aggregate(total=Sum("superficie_ha"))["total"]
-        or 0
+    superficie_totale = float(
+        Secteur.objects.filter(id__in=secteur_ids_for_year).aggregate(total=Sum("superficie_ha"))["total"] or 0
     )
-    superficie_totale = float(superficie_totale or 0)
     rendement_moyen = round(float(total_production) / superficie_totale, 2) if superficie_totale else 0
 
-    # Montant total des recus de vente (fcfa) sur les fiches concernees
+    # Ventes
     montant_total_ventes = (
         FicheRecuVente.objects.filter(fiche__in=fiches_recolte_qs, date__isnull=False, date__year=selected_year)
-        .aggregate(total=Sum("montant"))["total"]
-        or 0
+        .aggregate(total=Sum("montant"))["total"] or 0
     )
+    total_kg = float(
+        FicheRecuVente.objects.filter(fiche__in=fiches_recolte_qs, date__isnull=False, date__year=selected_year)
+        .aggregate(total=Sum("pesee_kg"))["total"] or 0
+    )
+    poids_moyen_regime = round(total_kg / float(total_production), 3) if total_production else 0
 
-    # Depenses recolte (nourriture + transport)
-    dep_nourriture = (
-        fiches_recolte_qs.filter(date__year=selected_year).aggregate(total=Sum("depense_nourriture"))["total"] or 0
-    )
-    dep_transport = (
-        fiches_recolte_qs.filter(date__year=selected_year).aggregate(total=Sum("depense_transport"))["total"] or 0
-    )
+    # Dépenses récolte — champs saisis manuellement sur chaque fiche
+    qs_year = fiches_recolte_qs.filter(date__year=selected_year)
+    dep_nourriture = float(qs_year.aggregate(t=Sum("depense_nourriture"))["t"] or 0)
+    dep_transport  = float(qs_year.aggregate(t=Sum("depense_transport"))["t"] or 0)
+    dep_salaires   = float(qs_year.aggregate(t=Sum("depense_salaire"))["t"] or 0)
     depenses_total_recolte = dep_nourriture + dep_transport
+    depenses_totales = dep_nourriture + dep_transport + dep_salaires
 
-    # Cout total travaux (consommables + repartition taches)
+    # Coûts travaux
     cost_expr = ExpressionWrapper(
         F("quantite") * F("prix_unitaire"),
         output_field=DecimalField(max_digits=20, decimal_places=2),
@@ -123,123 +113,104 @@ def summary_view(request):
         travaux_qs = travaux_qs.filter(secteurs_couverts=secteur_obj)
     travaux_qs = travaux_qs.distinct()
 
-    total_consommables = (
+    total_consommables = float(
         ConsommableTravaux.objects.filter(fiche__in=travaux_qs, fiche__created_at__year=selected_year)
-        .aggregate(total=Sum(cost_expr))["total"]
-        or 0
+        .aggregate(total=Sum(cost_expr))["total"] or 0
     )
-    total_taches = (
+    total_taches = float(
         RepartitionTache.objects.filter(fiche__in=travaux_qs, fiche__created_at__year=selected_year)
-        .aggregate(total=Sum(cost_expr))["total"]
-        or 0
+        .aggregate(total=Sum(cost_expr))["total"] or 0
     )
     cout_total_travaux = total_consommables + total_taches
 
     fiches_recolte_count = fiches_recolte_qs.filter(date__year=selected_year).count()
     fiches_travaux_count = travaux_qs.filter(created_at__year=selected_year).count()
 
-    # Helpers: series mensuelles (annee)
+    # Répartition production par type de régime
+    def repartition_par_regime(target_year):
+        result = {}
+        for rtype in ("grands", "moyens", "petits"):
+            val = details_qs.filter(
+                ligne__fiche__date__year=target_year, ligne__regime_type=rtype
+            ).aggregate(t=Sum("quantite"))["t"] or 0
+            result[rtype] = int(val)
+        return result
+
+    # ── Helpers séries mensuelles ─────────────────────────────────────────────
     month_labels = ["Jan", "Fev", "Mar", "Avr", "Mai", "Juin", "Juil", "Aout", "Sept", "Oct", "Nov", "Dec"]
 
-    # 6 derniers mois (glissant) sous forme de couples (annee, mois)
     last6 = []
-    m = today.month
-    y = today.year
+    m, y = today.month, today.year
     for _ in range(6):
         last6.append((y, m, month_labels[m - 1]))
         m -= 1
         if m == 0:
-            m = 12
-            y -= 1
+            m = 12; y -= 1
     last6.reverse()
     last6_labels = [t[2] for t in last6]
 
-    def production_by_month(year):
+    def production_by_month(target_year):
         qs = (
-            details_qs.filter(ligne__fiche__date__year=year)
-            .values("ligne__fiche__date__month")
-            .annotate(total=Sum("quantite"))
+            details_qs.filter(ligne__fiche__date__year=target_year)
+            .values("ligne__fiche__date__month").annotate(total=Sum("quantite"))
         )
-        by_month = {row["ligne__fiche__date__month"]: int(row["total"] or 0) for row in qs}
-        data = [by_month.get(m, 0) for m in range(1, 13)]
-        return {"year": year, "labels": month_labels, "data": data}
+        by_month = {r["ligne__fiche__date__month"]: int(r["total"] or 0) for r in qs}
+        return {"year": target_year, "labels": month_labels, "data": [by_month.get(m, 0) for m in range(1, 13)]}
 
-    def ventes_by_month(year):
+    def ventes_by_month(target_year):
         qs = (
-            FicheRecuVente.objects.filter(
-                fiche__in=fiches_recolte_qs,
-                date__isnull=False,
-                date__year=year,
-            )
-            .values("date__month")
-            .annotate(total=Sum("montant"))
+            FicheRecuVente.objects.filter(fiche__in=fiches_recolte_qs, date__isnull=False, date__year=target_year)
+            .values("date__month").annotate(total=Sum("montant"))
         )
-        by_month = {row["date__month"]: float(row["total"] or 0) for row in qs}
-        data = [by_month.get(m, 0) for m in range(1, 13)]
-        return {"year": year, "labels": month_labels, "data": data}
+        by_month = {r["date__month"]: float(r["total"] or 0) for r in qs}
+        return {"year": target_year, "labels": month_labels, "data": [by_month.get(m, 0) for m in range(1, 13)]}
 
-    # Production mensuelle (6 derniers mois)
-    data = []
-    for yy, mm, _lbl in last6:
-        total = (
-            details_qs.filter(
-                ligne__fiche__date__year=yy,
-                ligne__fiche__date__month=mm,
-            ).aggregate(total=Sum("quantite"))["total"]
-            or 0
-        )
-        data.append(int(total))
+    # Production 6 derniers mois
+    prod_last6 = []
+    for yy, mm, _ in last6:
+        val = details_qs.filter(ligne__fiche__date__year=yy, ligne__fiche__date__month=mm)\
+                        .aggregate(t=Sum("quantite"))["t"] or 0
+        prod_last6.append(int(val))
 
+    # Ventes 6 derniers mois
+    ventes_last6 = []
+    for yy, mm, _ in last6:
+        val = FicheRecuVente.objects.filter(
+            fiche__in=fiches_recolte_qs, date__isnull=False, date__year=yy, date__month=mm
+        ).aggregate(t=Sum("montant"))["t"] or 0
+        ventes_last6.append(float(val))
+
+    # Comparaisons N / N-1 / N-2
     production_annuelle = production_by_month(selected_year)
     production_compare = {
         "year": selected_year,
         "labels": month_labels,
         "current": production_by_month(selected_year)["data"],
         "previous": production_by_month(prev_year)["data"],
+        "prev2": production_by_month(prev2_year)["data"],
     }
-
-    # Montant ventes mensuel (6 derniers mois)
-    ventes_data = []
-    for yy, mm, _lbl in last6:
-        total = (
-            FicheRecuVente.objects.filter(
-                fiche__in=fiches_recolte_qs,
-                date__isnull=False,
-                date__year=yy,
-                date__month=mm,
-            ).aggregate(total=Sum("montant"))["total"]
-            or 0
-        )
-        ventes_data.append(float(total))
-
     ventes_annuel = ventes_by_month(selected_year)
     ventes_compare = {
         "year": selected_year,
         "labels": month_labels,
         "current": ventes_by_month(selected_year)["data"],
         "previous": ventes_by_month(prev_year)["data"],
+        "prev2": ventes_by_month(prev2_year)["data"],
     }
 
-    # Performance recolteurs (top 5)
+    # Performance récolteurs (top 5)
     def perf_recolteurs_year(target_year):
         qs = (
             details_qs.filter(ligne__fiche__date__year=target_year)
             .exclude(ligne__recolteur__isnull=True)
             .values("ligne__recolteur", "ligne__recolteur__nom", "ligne__recolteur_nom")
-            .annotate(total=Sum("quantite"))
-            .order_by("-total")[:5]
+            .annotate(total=Sum("quantite")).order_by("-total")[:5]
         )
-        labels = [
-            (p["ligne__recolteur__nom"] or p["ligne__recolteur_nom"] or "N/A")
-            for p in qs
-        ]
+        labels = [(p["ligne__recolteur__nom"] or p["ligne__recolteur_nom"] or "N/A") for p in qs]
         ids = [p["ligne__recolteur"] for p in qs]
-        data = [int(p["total"] or 0) for p in qs]
-        return {"labels": labels, "ids": ids, "data": data}
+        return {"labels": labels, "ids": ids, "data": [int(p["total"] or 0) for p in qs]}
 
     def perf_recolteurs_last6():
-        # Top recolteurs sur les 6 derniers mois glissants
-        # On filtre par mois via un OR sur 6 couples (annee, mois)
         q = Q()
         for yy, mm, _ in last6:
             q |= Q(ligne__fiche__date__year=yy, ligne__fiche__date__month=mm)
@@ -247,43 +218,30 @@ def summary_view(request):
             details_qs.filter(q)
             .exclude(ligne__recolteur__isnull=True)
             .values("ligne__recolteur", "ligne__recolteur__nom", "ligne__recolteur_nom")
-            .annotate(total=Sum("quantite"))
-            .order_by("-total")[:5]
+            .annotate(total=Sum("quantite")).order_by("-total")[:5]
         )
-        labels = [
-            (p["ligne__recolteur__nom"] or p["ligne__recolteur_nom"] or "N/A")
-            for p in qs
-        ]
+        labels = [(p["ligne__recolteur__nom"] or p["ligne__recolteur_nom"] or "N/A") for p in qs]
         ids = [p["ligne__recolteur"] for p in qs]
-        data = [int(p["total"] or 0) for p in qs]
-        return {"labels": labels, "ids": ids, "data": data}
+        return {"labels": labels, "ids": ids, "data": [int(p["total"] or 0) for p in qs]}
 
     perf_year = perf_recolteurs_year(selected_year)
     perf_6m = perf_recolteurs_last6()
 
-    # Compare: on prend le top 5 de l'annee selectionnee et on recupere leurs totaux sur l'annee precedente
     q_prev = (
         details_qs.filter(ligne__fiche__date__year=prev_year, ligne__recolteur__in=perf_year["ids"])
-        .values("ligne__recolteur")
-        .annotate(total=Sum("quantite"))
+        .values("ligne__recolteur").annotate(total=Sum("quantite"))
     )
-    prev_map = {row["ligne__recolteur"]: int(row["total"] or 0) for row in q_prev}
+    prev_map = {r["ligne__recolteur"]: int(r["total"] or 0) for r in q_prev}
     perf_compare = {
-        "year": selected_year,
-        "labels": perf_year["labels"],
-        "ids": perf_year["ids"],
+        "year": selected_year, "labels": perf_year["labels"], "ids": perf_year["ids"],
         "current": perf_year["data"],
         "previous": [prev_map.get(i, 0) for i in perf_year["ids"]],
     }
 
-    # Production par secteur (annee)
-    def secteurs_ordered_list():
-        qs = Secteur.objects.all().order_by("code")
-        if secteur_obj:
-            qs = qs.filter(id=secteur_obj.id)
-        return list(qs.values("id", "code", "nom", "superficie_ha"))
-
-    secteurs_ordered = secteurs_ordered_list()
+    # Production par secteur
+    secteurs_ordered = list(Secteur.objects.all().order_by("code")
+                             .filter(**({} if not secteur_obj else {"id": secteur_obj.id}))
+                             .values("id", "code", "nom", "superficie_ha", "statut"))
     prod_labels = [s["code"] for s in secteurs_ordered]
     prod_ids = [s["id"] for s in secteurs_ordered]
     prod_names = [s["nom"] for s in secteurs_ordered]
@@ -291,12 +249,10 @@ def summary_view(request):
     def production_par_secteur_year(target_year):
         qs = (
             details_qs.filter(ligne__fiche__date__year=target_year)
-            .values("secteur__id", "secteur__code")
-            .annotate(total=Sum("quantite"))
+            .values("secteur__id", "secteur__code").annotate(total=Sum("quantite"))
         )
-        by_code = {row["secteur__code"]: int(row["total"] or 0) for row in qs if row["secteur__code"]}
-        values = [by_code.get(code, 0) for code in prod_labels]
-        return values
+        by_code = {r["secteur__code"]: int(r["total"] or 0) for r in qs if r["secteur__code"]}
+        return [by_code.get(code, 0) for code in prod_labels]
 
     def production_par_secteur_last6():
         q = Q()
@@ -304,32 +260,29 @@ def summary_view(request):
             q |= Q(ligne__fiche__date__year=yy, ligne__fiche__date__month=mm)
         qs = (
             details_qs.filter(q)
-            .values("secteur__id", "secteur__code")
-            .annotate(total=Sum("quantite"))
+            .values("secteur__id", "secteur__code").annotate(total=Sum("quantite"))
         )
-        by_code = {row["secteur__code"]: int(row["total"] or 0) for row in qs if row["secteur__code"]}
+        by_code = {r["secteur__code"]: int(r["total"] or 0) for r in qs if r["secteur__code"]}
         return [by_code.get(code, 0) for code in prod_labels]
 
     prod_values = production_par_secteur_year(selected_year)
     prod_values_6m = production_par_secteur_last6()
     prod_values_prev = production_par_secteur_year(prev_year)
+    prod_values_prev2 = production_par_secteur_year(prev2_year)
 
     rendement_values = []
-    for idx, s in enumerate(secteurs_ordered):
-        superficie = float(s["superficie_ha"] or 0)
-        val = prod_values[idx] if idx < len(prod_values) else 0
-        rendement_values.append(round(float(val) / superficie, 4) if superficie else 0)
-
     rendement_values_6m = []
     rendement_values_prev = []
     for idx, s in enumerate(secteurs_ordered):
-        superficie = float(s["superficie_ha"] or 0)
+        sup = float(s["superficie_ha"] or 0)
+        v = prod_values[idx] if idx < len(prod_values) else 0
         v6 = prod_values_6m[idx] if idx < len(prod_values_6m) else 0
         vp = prod_values_prev[idx] if idx < len(prod_values_prev) else 0
-        rendement_values_6m.append(round(float(v6) / superficie, 4) if superficie else 0)
-        rendement_values_prev.append(round(float(vp) / superficie, 4) if superficie else 0)
+        rendement_values.append(round(float(v) / sup, 4) if sup else 0)
+        rendement_values_6m.append(round(float(v6) / sup, 4) if sup else 0)
+        rendement_values_prev.append(round(float(vp) / sup, 4) if sup else 0)
 
-    # Depenses vs production (mensuel, annee)
+    # Dépenses mensuelles
     zero_money = Value(0, output_field=DecimalField(max_digits=12, decimal_places=2))
     dep_qs = (
         fiches_recolte_qs.filter(date__year=selected_year)
@@ -339,24 +292,9 @@ def summary_view(request):
             transport=Coalesce(Sum("depense_transport"), zero_money),
         )
     )
-    dep_by_month = {row["date__month"]: float(row["nourriture"] + row["transport"]) for row in dep_qs}
+    dep_by_month = {r["date__month"]: float(r["nourriture"] + r["transport"]) for r in dep_qs}
     depenses_mensuelles = [dep_by_month.get(m, 0.0) for m in range(1, 13)]
 
-    production_mensuelle_annee = production_by_month(selected_year)["data"]
-
-    # Depenses (6 derniers mois)
-    dep_last6 = []
-    for yy, mm, _lbl in last6:
-        row = (
-            fiches_recolte_qs.filter(date__year=yy, date__month=mm)
-            .aggregate(
-                nourriture=Coalesce(Sum("depense_nourriture"), zero_money),
-                transport=Coalesce(Sum("depense_transport"), zero_money),
-            )
-        )
-        dep_last6.append(float((row.get("nourriture") or 0) + (row.get("transport") or 0)))
-
-    # Compare depenses
     dep_qs_prev = (
         fiches_recolte_qs.filter(date__year=prev_year)
         .values("date__month")
@@ -365,12 +303,38 @@ def summary_view(request):
             transport=Coalesce(Sum("depense_transport"), zero_money),
         )
     )
-    dep_prev_by_month = {row["date__month"]: float(row["nourriture"] + row["transport"]) for row in dep_qs_prev}
+    dep_prev_by_month = {r["date__month"]: float(r["nourriture"] + r["transport"]) for r in dep_qs_prev}
     depenses_prev = [dep_prev_by_month.get(m, 0.0) for m in range(1, 13)]
 
-    # Cout travaux par nature (top 8) et mensuel (annee)
+    dep_last6 = []
+    for yy, mm, _ in last6:
+        row = fiches_recolte_qs.filter(date__year=yy, date__month=mm).aggregate(
+            nourriture=Coalesce(Sum("depense_nourriture"), zero_money),
+            transport=Coalesce(Sum("depense_transport"), zero_money),
+        )
+        dep_last6.append(float((row.get("nourriture") or 0) + (row.get("transport") or 0)))
+
+    # Dépenses par secteur et par type de régime
+    def depenses_par_secteur(target_year):
+        result = {}
+        for code in prod_labels:
+            fiches_ids = (
+                FicheRecolteDetail.objects.filter(
+                    secteur__code=code, ligne__fiche__date__year=target_year
+                ).values_list("ligne__fiche_id", flat=True).distinct()
+            )
+            dep = float(
+                FicheRecolte.objects.filter(id__in=fiches_ids).aggregate(
+                    t=Coalesce(Sum("depense_nourriture") + Sum("depense_transport"), zero_money)
+                )["t"] or 0
+            )
+            result[code] = round(dep, 2)
+        return result
+
+    dep_par_secteur = depenses_par_secteur(selected_year)
+
+    # Coûts travaux par nature
     def cout_travaux_par_nature_for_qs(trav_qs, year_filter=None, month_pairs=None):
-        # year_filter: int, month_pairs: list[(yy,mm)]
         cons = ConsommableTravaux.objects.filter(fiche__in=trav_qs)
         taches = RepartitionTache.objects.filter(fiche__in=trav_qs)
         if year_filter is not None:
@@ -383,158 +347,169 @@ def summary_view(request):
             cons = cons.filter(q)
             taches = taches.filter(q)
 
-        cons_by_nature = cons.values("fiche__nature_travaux").annotate(total=Sum(cost_expr))
-        taches_by_nature = taches.values("fiche__nature_travaux").annotate(total=Sum(cost_expr))
-
-        cost_nature_map = {}
-        for row in cons_by_nature:
-            key = (row["fiche__nature_travaux"] or "").strip() or "N/A"
-            cost_nature_map[key] = cost_nature_map.get(key, 0) + float(row["total"] or 0)
-        for row in taches_by_nature:
-            key = (row["fiche__nature_travaux"] or "").strip() or "N/A"
-            cost_nature_map[key] = cost_nature_map.get(key, 0) + float(row["total"] or 0)
-
-        return cost_nature_map
+        cost_map = {}
+        for r in cons.values("fiche__nature_travaux").annotate(total=Sum(cost_expr)):
+            key = (r["fiche__nature_travaux"] or "").strip() or "N/A"
+            cost_map[key] = cost_map.get(key, 0) + float(r["total"] or 0)
+        for r in taches.values("fiche__nature_travaux").annotate(total=Sum(cost_expr)):
+            key = (r["fiche__nature_travaux"] or "").strip() or "N/A"
+            cost_map[key] = cost_map.get(key, 0) + float(r["total"] or 0)
+        return cost_map
 
     cost_nature_map = cout_travaux_par_nature_for_qs(travaux_qs, year_filter=selected_year)
     top_natures = sorted(cost_nature_map.items(), key=lambda x: x[1], reverse=True)[:8]
     cout_nature_labels = [k for k, _ in top_natures]
     cout_nature_values = [round(v, 2) for _, v in top_natures]
 
-    # Nature (6m)
     cost_nature_map_6m = cout_travaux_par_nature_for_qs(travaux_qs, month_pairs=last6)
     top_natures_6m = sorted(cost_nature_map_6m.items(), key=lambda x: x[1], reverse=True)[:8]
     cout_nature_labels_6m = [k for k, _ in top_natures_6m]
     cout_nature_values_6m = [round(v, 2) for _, v in top_natures_6m]
 
-    # Compare nature: top natures de l'annee selectionnee + valeurs de l'annee precedente sur ces memes natures
     cost_nature_map_prev = cout_travaux_par_nature_for_qs(travaux_qs, year_filter=prev_year)
     cout_nature_prev_values = [round(cost_nature_map_prev.get(k, 0.0), 2) for k in cout_nature_labels]
 
-    def cout_travaux_by_month_for_year(target_year):
-        cons_by_month = (
-            ConsommableTravaux.objects.filter(fiche__in=travaux_qs, fiche__created_at__year=target_year)
-            .values("fiche__created_at__month")
-            .annotate(total=Sum(cost_expr))
-        )
-        taches_by_month = (
-            RepartitionTache.objects.filter(fiche__in=travaux_qs, fiche__created_at__year=target_year)
-            .values("fiche__created_at__month")
-            .annotate(total=Sum(cost_expr))
-        )
-        cost_month_map = {}
-        for row in cons_by_month:
-            mm = row["fiche__created_at__month"]
-            cost_month_map[mm] = cost_month_map.get(mm, 0) + float(row["total"] or 0)
-        for row in taches_by_month:
-            mm = row["fiche__created_at__month"]
-            cost_month_map[mm] = cost_month_map.get(mm, 0) + float(row["total"] or 0)
-        return [round(cost_month_map.get(mm, 0.0), 2) for mm in range(1, 13)]
+    def cout_travaux_by_month(target_year):
+        cost_map = {}
+        for r in ConsommableTravaux.objects.filter(fiche__in=travaux_qs, fiche__created_at__year=target_year)\
+                .values("fiche__created_at__month").annotate(total=Sum(cost_expr)):
+            mm = r["fiche__created_at__month"]
+            cost_map[mm] = cost_map.get(mm, 0) + float(r["total"] or 0)
+        for r in RepartitionTache.objects.filter(fiche__in=travaux_qs, fiche__created_at__year=target_year)\
+                .values("fiche__created_at__month").annotate(total=Sum(cost_expr)):
+            mm = r["fiche__created_at__month"]
+            cost_map[mm] = cost_map.get(mm, 0) + float(r["total"] or 0)
+        return [round(cost_map.get(mm, 0.0), 2) for mm in range(1, 13)]
 
-    cout_travaux_annuel = cout_travaux_by_month_for_year(selected_year)
-    cout_travaux_prev = cout_travaux_by_month_for_year(prev_year)
+    cout_travaux_annuel = cout_travaux_by_month(selected_year)
+    cout_travaux_prev = cout_travaux_by_month(prev_year)
 
-    # Cout travaux (6 derniers mois)
     cout_travaux_last6 = []
-    for yy, mm, _lbl in last6:
-        tot_cons = (
-            ConsommableTravaux.objects.filter(
-                fiche__in=travaux_qs,
-                fiche__created_at__year=yy,
-                fiche__created_at__month=mm,
-            ).aggregate(total=Sum(cost_expr))["total"]
-            or 0
-        )
-        tot_taches = (
-            RepartitionTache.objects.filter(
-                fiche__in=travaux_qs,
-                fiche__created_at__year=yy,
-                fiche__created_at__month=mm,
-            ).aggregate(total=Sum(cost_expr))["total"]
-            or 0
-        )
-        cout_travaux_last6.append(round(float(tot_cons) + float(tot_taches), 2))
+    for yy, mm, _ in last6:
+        tc = float(ConsommableTravaux.objects.filter(fiche__in=travaux_qs,
+                    fiche__created_at__year=yy, fiche__created_at__month=mm)
+                    .aggregate(t=Sum(cost_expr))["t"] or 0)
+        tt = float(RepartitionTache.objects.filter(fiche__in=travaux_qs,
+                    fiche__created_at__year=yy, fiche__created_at__month=mm)
+                    .aggregate(t=Sum(cost_expr))["t"] or 0)
+        cout_travaux_last6.append(round(tc + tt, 2))
+
+    # Production journalière
+    prod_by_date_qs = (
+        details_qs.filter(ligne__fiche__date__year=selected_year)
+        .values("ligne__fiche__date").annotate(total=Sum("quantite"))
+        .order_by("ligne__fiche__date")
+    )
+    production_par_date_chart = {
+        "labels": [str(r["ligne__fiche__date"]) for r in prod_by_date_qs],
+        "data": [int(r["total"] or 0) for r in prod_by_date_qs],
+    }
+
+    # Multi-années
+    years_param = request.query_params.get("years", "")
+    multi_years_list = sorted({
+        int(y_str.strip()) for y_str in years_param.split(",")
+        if y_str.strip().isdigit() and 2000 <= int(y_str.strip()) <= 2100
+    }) or [selected_year]
+
+    production_multi_years = [
+        {"year": y, "labels": month_labels, "data": production_by_month(y)["data"]}
+        for y in multi_years_list
+    ]
+    production_par_secteur_multi_years = [
+        {"year": y, "labels": prod_labels, "ids": prod_ids, "data": production_par_secteur_year(y)}
+        for y in multi_years_list
+    ]
 
     # Listes rapides
-    secteurs_list = list(
-        Secteur.objects.all().order_by("-id")[:5].values("code", "nom", "superficie_ha")
-    )
-    recoltes_list = list(
-        fiches_recolte_qs.all().order_by("-date")[:5].values("id", "date")
-    )
-    travaux_list = list(
-        travaux_qs.all()
-        .order_by("-id")[:5]
-        .values("id", "periode_travaux", "nature_travaux")
-    )
-    recus_list = list(
-        FicheRecuVente.objects.filter(fiche__in=fiches_recolte_qs)
-        .order_by("-id")[:5]
-        .values("date", "client", "montant")
-    )
-    materiels_list = list(
-        MaterielEquipement.objects.all()
-        .order_by("-id")[:5]
-        .values("numero", "designation", "quantite")
-    )
+    secteurs_list = list(Secteur.objects.all().order_by("-id")[:5].values("code", "nom", "superficie_ha", "statut"))
+    recoltes_list = list(fiches_recolte_qs.all().order_by("-date")[:5].values("id", "date", "statut"))
+    travaux_list = list(travaux_qs.all().order_by("-id")[:5].values("id", "periode_travaux", "nature_travaux", "statut_avancement"))
+    recus_list = list(FicheRecuVente.objects.filter(fiche__in=fiches_recolte_qs).order_by("-id")[:5].values("date", "client", "montant"))
+    materiels_list = list(MaterielEquipement.objects.all().order_by("-id")[:5].values("numero", "designation", "quantite", "statut_utilisation"))
 
-    return Response(
-        {
-            "year": selected_year,
-            "stats": {
-                "total_production": int(total_production),
-                "secteurs_count": secteurs_count_total,
-                "secteurs_involved": secteurs_involved,
-                "recolteurs_actifs": recolteurs_actifs,
-                "rendement_moyen": rendement_moyen,
-                "montant_total_ventes": montant_total_ventes,
-                "depenses_total_recolte": depenses_total_recolte,
-                "cout_total_travaux": cout_total_travaux,
-                "fiches_recolte_count": fiches_recolte_count,
-                "fiches_travaux_count": fiches_travaux_count,
+    return Response({
+        "year": selected_year,
+        "stats": {
+            "total_production": total_production,
+            "secteurs_count": secteurs_count_total,
+            "secteurs_actifs": secteurs_actifs,
+            "secteurs_involved": secteurs_involved,
+            "recolteurs_actifs": recolteurs_actifs,
+            "rendement_moyen": rendement_moyen,
+            "total_kg": round(total_kg, 2),
+            "poids_moyen_regime": poids_moyen_regime,
+            "montant_total_ventes": float(montant_total_ventes),
+            "depenses_total_recolte": depenses_total_recolte,
+            "depenses_salaires_recolteurs": dep_salaires,
+            "depenses_totales": depenses_totales,
+            "cout_total_travaux": cout_total_travaux,
+            "fiches_recolte_count": fiches_recolte_count,
+            "fiches_travaux_count": fiches_travaux_count,
+            "repartition_par_regime": repartition_par_regime(selected_year),
+        },
+        "charts": {
+            "production_mensuelle": {"labels": last6_labels, "data": prod_last6},
+            "production_annuelle": production_annuelle,
+            "production_compare": production_compare,
+            "performance_recolteurs": {"labels": perf_year["labels"], "data": perf_year["data"], "ids": perf_year["ids"]},
+            "performance_recolteurs_6m": {"labels": perf_6m["labels"], "data": perf_6m["data"], "ids": perf_6m["ids"]},
+            "performance_recolteurs_compare": perf_compare,
+            "montant_ventes_mensuel": {"labels": last6_labels, "data": ventes_last6},
+            "montant_ventes_annuel": ventes_annuel,
+            "montant_ventes_compare": ventes_compare,
+            "production_par_secteur": {"labels": prod_labels, "data": prod_values, "ids": prod_ids, "names": prod_names},
+            "production_par_secteur_6m": {"labels": prod_labels, "data": prod_values_6m, "ids": prod_ids, "names": prod_names},
+            "production_par_secteur_compare": {
+                "year": selected_year, "labels": prod_labels, "ids": prod_ids, "names": prod_names,
+                "current": prod_values, "previous": prod_values_prev, "prev2": prod_values_prev2,
             },
-            "charts": {
-                "production_mensuelle": {"labels": last6_labels, "data": data},
-                "production_annuelle": production_annuelle,
-                "production_compare": production_compare,
-                "performance_recolteurs": {"labels": perf_year["labels"], "data": perf_year["data"], "ids": perf_year["ids"]},
-                "performance_recolteurs_6m": {"labels": perf_6m["labels"], "data": perf_6m["data"], "ids": perf_6m["ids"]},
-                "performance_recolteurs_compare": perf_compare,
-                "montant_ventes_mensuel": {"labels": last6_labels, "data": ventes_data},
-                "montant_ventes_annuel": ventes_annuel,
-                "montant_ventes_compare": ventes_compare,
-                "production_par_secteur": {"labels": prod_labels, "data": prod_values, "ids": prod_ids, "names": prod_names},
-                "production_par_secteur_6m": {"labels": prod_labels, "data": prod_values_6m, "ids": prod_ids, "names": prod_names},
-                "production_par_secteur_compare": {"year": selected_year, "labels": prod_labels, "ids": prod_ids, "names": prod_names, "current": prod_values, "previous": prod_values_prev},
-                "rendement_par_secteur": {"labels": prod_labels, "data": rendement_values, "ids": prod_ids, "names": prod_names},
-                "rendement_par_secteur_6m": {"labels": prod_labels, "data": rendement_values_6m, "ids": prod_ids, "names": prod_names},
-                "rendement_par_secteur_compare": {"year": selected_year, "labels": prod_labels, "ids": prod_ids, "names": prod_names, "current": rendement_values, "previous": rendement_values_prev},
-                "depenses_vs_production": {
-                    "year": selected_year,
-                    "labels": month_labels,
-                    "production": production_mensuelle_annee,
-                    "depenses": depenses_mensuelles,
-                },
-                "depenses_vs_production_6m": {"labels": last6_labels, "production": data, "depenses": dep_last6},
-                "depenses_vs_production_compare": {"year": selected_year, "labels": month_labels, "production_current": production_compare["current"], "production_previous": production_compare["previous"], "depenses_current": depenses_mensuelles, "depenses_previous": depenses_prev},
-                "cout_travaux_par_nature": {"labels": cout_nature_labels, "data": cout_nature_values},
-                "cout_travaux_par_nature_6m": {"labels": cout_nature_labels_6m, "data": cout_nature_values_6m},
-                "cout_travaux_par_nature_compare": {"year": selected_year, "labels": cout_nature_labels, "current": cout_nature_values, "previous": cout_nature_prev_values},
-                "cout_travaux_annuel": {"year": selected_year, "labels": month_labels, "data": cout_travaux_annuel},
-                "cout_travaux_annuel_6m": {"labels": last6_labels, "data": cout_travaux_last6},
-                "cout_travaux_annuel_compare": {"year": selected_year, "labels": month_labels, "current": cout_travaux_annuel, "previous": cout_travaux_prev},
+            "rendement_par_secteur": {"labels": prod_labels, "data": rendement_values, "ids": prod_ids, "names": prod_names},
+            "rendement_par_secteur_6m": {"labels": prod_labels, "data": rendement_values_6m, "ids": prod_ids, "names": prod_names},
+            "rendement_par_secteur_compare": {
+                "year": selected_year, "labels": prod_labels, "ids": prod_ids, "names": prod_names,
+                "current": rendement_values, "previous": rendement_values_prev,
             },
-            "lists": {
-                "secteurs": secteurs_list,
-                "recoltes": recoltes_list,
-                "travaux": travaux_list,
-                "recus_vente": recus_list,
-                "materiels": materiels_list,
+            "depenses_vs_production": {
+                "year": selected_year, "labels": month_labels,
+                "production": production_by_month(selected_year)["data"],
+                "depenses": depenses_mensuelles,
             },
-            "filters": {
-                "secteur": secteur_obj.id if secteur_obj else None,
-                "recolteur": recolteur_obj.id if recolteur_obj else None,
-                "regime_type": regime_type or None,
+            "depenses_vs_production_6m": {"labels": last6_labels, "production": prod_last6, "depenses": dep_last6},
+            "depenses_vs_production_compare": {
+                "year": selected_year, "labels": month_labels,
+                "production_current": production_compare["current"],
+                "production_previous": production_compare["previous"],
+                "depenses_current": depenses_mensuelles,
+                "depenses_previous": depenses_prev,
             },
-        }
-    )
+            "depenses_par_secteur": {"labels": prod_labels, "data": [dep_par_secteur.get(c, 0) for c in prod_labels]},
+            "cout_travaux_par_nature": {"labels": cout_nature_labels, "data": cout_nature_values},
+            "cout_travaux_par_nature_6m": {"labels": cout_nature_labels_6m, "data": cout_nature_values_6m},
+            "cout_travaux_par_nature_compare": {
+                "year": selected_year, "labels": cout_nature_labels,
+                "current": cout_nature_values, "previous": cout_nature_prev_values,
+            },
+            "cout_travaux_annuel": {"year": selected_year, "labels": month_labels, "data": cout_travaux_annuel},
+            "cout_travaux_annuel_6m": {"labels": last6_labels, "data": cout_travaux_last6},
+            "cout_travaux_annuel_compare": {
+                "year": selected_year, "labels": month_labels,
+                "current": cout_travaux_annuel, "previous": cout_travaux_prev,
+            },
+            "production_par_date": production_par_date_chart,
+            "production_multi_years": production_multi_years,
+            "production_par_secteur_multi_years": production_par_secteur_multi_years,
+        },
+        "lists": {
+            "secteurs": secteurs_list,
+            "recoltes": recoltes_list,
+            "travaux": travaux_list,
+            "recus_vente": recus_list,
+            "materiels": materiels_list,
+        },
+        "filters": {
+            "secteur": secteur_obj.id if secteur_obj else None,
+            "recolteur": recolteur_obj.id if recolteur_obj else None,
+            "regime_type": regime_type or None,
+        },
+    })

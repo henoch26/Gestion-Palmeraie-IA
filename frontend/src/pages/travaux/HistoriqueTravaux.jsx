@@ -1,4 +1,18 @@
 import { useEffect, useMemo, useState } from "react";
+
+const NATURE_TRAVAUX_OPTIONS = [
+  { value: "desherbage", label: "Désherbage" },
+  { value: "traitement_phytosanitaire", label: "Traitement phytosanitaire" },
+  { value: "fertilisation", label: "Fertilisation" },
+  { value: "taille_ablation", label: "Taille / Ablation" },
+  { value: "recolte", label: "Récolte" },
+  { value: "pepiniere", label: "Pépinière" },
+  { value: "plantation", label: "Plantation" },
+  { value: "entretien_voie", label: "Entretien voie d'accès" },
+  { value: "entretien_infrastructure", label: "Entretien infrastructure" },
+  { value: "recensement", label: "Recensement" },
+  { value: "autre", label: "Autre" },
+];
 import { useToast } from "../../context/ToastContext.jsx";
 import DataTable from "../../components/DataTable.jsx";
 import LogoLoader from "../../components/LogoLoader.jsx";
@@ -6,7 +20,8 @@ import FicheTravauxDialog from "../../components/FicheTravauxDialog.jsx";
 import SuccessDialog from "../../components/SuccessDialog.jsx";
 import { ficheTravauxInitial } from "../../data/ficheTravauxData.js";
 import { listSecteurs } from "../../services/secteurService.js";
-import { createFicheTravaux, listFichesTravaux } from "../../services/travauxService.js";
+import { createFicheTravaux, listFichesTravaux, patchFicheTravaux } from "../../services/travauxService.js";
+import { useAuth } from "../../context/AuthContext.jsx";
 import { getToken } from "../../services/authService.js";
 import { sanitizeDecimal, sanitizeInt } from "../../utils/number.js";
 
@@ -17,6 +32,7 @@ const uid = (prefix = "ID") =>
 
 export default function HistoriqueTravaux() {
   const { pushToast } = useToast();
+  const { isAdmin, isSuperviseur } = useAuth();
 
   const [tab, setTab] = useState("entete"); // entete | consommables | taches | historique
 
@@ -251,6 +267,19 @@ export default function HistoriqueTravaux() {
     }
   };
 
+  const handleStatutChange = async (ficheId, newStatut) => {
+    try {
+      await patchFicheTravaux(ficheId, { statut: newStatut });
+      setHistory((prev) =>
+        prev.map((f) => (f.id === ficheId ? { ...f, statut: newStatut } : f))
+      );
+      const labels = { soumis: "soumise", valide: "validee", brouillon: "rejetee" };
+      pushToast({ type: "success", title: "Travaux", message: `Fiche ${labels[newStatut] || newStatut}` });
+    } catch (err) {
+      pushToast({ type: "error", title: "Statut", message: err.message });
+    }
+  };
+
   const handleExport = async () => {
     try {
       const token = getToken();
@@ -280,20 +309,57 @@ export default function HistoriqueTravaux() {
   const historyColumns = [
     { key: "id", label: "ID" },
     { key: "periode_travaux", label: "Periode" },
-    { key: "nature_travaux", label: "Nature" },
+    {
+      key: "nature_travaux",
+      label: "Nature",
+      render: (row) => row.nature_travaux_display || row.nature_travaux || "-",
+    },
     { key: "superviseur_travaux", label: "Superviseur" },
-    { key: "superficie_couverte_ha", label: "Superficie (ha)" },
     { key: "nb_personnes", label: "Nb pers." },
-    { key: "total_cout", label: "Total (FCFA)" },
     { key: "secteurs", label: "Secteurs" },
+    {
+      key: "statut",
+      label: "Statut",
+      render: (row) => {
+        const s = row.statut || "brouillon";
+        return <span className={`statut-badge statut-${s}`}>{row.statut_display || s}</span>;
+      },
+    },
     {
       key: "actions",
       label: "Actions",
-      render: (row) => (
-        <div className="row-actions">
-          <button onClick={() => setSelectedFiche(row)}>Voir</button>
-        </div>
-      ),
+      render: (row) => {
+        const s = row.statut || "brouillon";
+        return (
+          <div className="row-actions">
+            <button onClick={() => setSelectedFiche(row)}>Voir</button>
+            {s === "brouillon" && (isSuperviseur || isAdmin) && (
+              <button
+                className="btn-warning btn-sm"
+                onClick={() => handleStatutChange(row.id, "soumis")}
+              >
+                Soumettre
+              </button>
+            )}
+            {s === "soumis" && isAdmin && (
+              <>
+                <button
+                  className="btn-primary btn-sm"
+                  onClick={() => handleStatutChange(row.id, "valide")}
+                >
+                  Valider
+                </button>
+                <button
+                  className="btn-ghost btn-sm"
+                  onClick={() => handleStatutChange(row.id, "brouillon")}
+                >
+                  Rejeter
+                </button>
+              </>
+            )}
+          </div>
+        );
+      },
     },
   ];
 
@@ -383,7 +449,7 @@ export default function HistoriqueTravaux() {
               </label>
               <label>
                 Nature des travaux
-                <input
+                <select
                   className={`fiche-input ${fieldErrors.natureTravaux ? "input-error" : ""}`}
                   value={fiche.natureTravaux}
                   onChange={(e) => {
@@ -391,7 +457,12 @@ export default function HistoriqueTravaux() {
                     setFiche((p) => ({ ...p, natureTravaux: v }));
                     clearFieldError("natureTravaux");
                   }}
-                />
+                >
+                  <option value="">-- Choisir --</option>
+                  {NATURE_TRAVAUX_OPTIONS.map((opt) => (
+                    <option key={opt.value} value={opt.value}>{opt.label}</option>
+                  ))}
+                </select>
                 {fieldErrors.natureTravaux && (
                   <span className="field-error">{fieldErrors.natureTravaux}</span>
                 )}

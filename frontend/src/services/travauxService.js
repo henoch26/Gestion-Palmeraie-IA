@@ -1,4 +1,4 @@
-import { apiDelete, apiGet, apiPost, apiPut } from "../api/axios.js";
+import { apiDelete, apiGet, apiPatch, apiPost, apiPut } from "../api/axios.js";
 import { endpoints } from "../api/endpoints.js";
 
 // CRUD fiches de travaux
@@ -8,3 +8,5 @@ export const updateFicheTravaux = (id, payload) =>
   apiPut(`${endpoints.travaux}${id}/`, payload);
 export const deleteFicheTravaux = (id) =>
   apiDelete(`${endpoints.travaux}${id}/`);
+export const patchFicheTravaux = (id, payload) =>
+  apiPatch(`${endpoints.travaux}${id}/`, payload);

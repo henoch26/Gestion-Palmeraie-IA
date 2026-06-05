@@ -52,7 +52,7 @@ export default function DetailRecolteur() {
       const url = URL.createObjectURL(blob);
       const link = document.createElement("a");
       link.href = url;
-      link.download = `recolteur_${data?.recolteur?.code || id}_recoltes_${year}.csv`;
+      link.download = `recolteur_${data?.recolteur?.numero_telephone || id}_recoltes_${year}.csv`;
       link.click();
       URL.revokeObjectURL(url);
     } catch (err) {
@@ -109,7 +109,7 @@ export default function DetailRecolteur() {
     <div className="page">
       <div className="page-header-row">
         <h2>
-          Recolteur {data?.recolteur?.code ? `${data.recolteur.code} - ${data.recolteur.nom}` : `#${id}`}
+          Recolteur {data?.recolteur?.nom ? `${data.recolteur.nom} (${data.recolteur.numero_telephone || `#${id}`})` : `#${id}`}
         </h2>
         <div className="row-actions">
           <button className="btn-ghost" onClick={() => navigate(-1)}>Retour</button>

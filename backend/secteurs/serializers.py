@@ -10,13 +10,13 @@ class SecteurSerializer(serializers.ModelSerializer):
     production_total = serializers.IntegerField(read_only=True)
     last_recolte = serializers.DateField(read_only=True, allow_null=True)
     rendement_ha = serializers.SerializerMethodField()
+    statut_display = serializers.CharField(source="get_statut_display", read_only=True)
 
     class Meta:
         model = Secteur
         fields = "__all__"
 
     def validate(self, attrs):
-        # Eviter les doublons de secteurs par nom (cas typique: "GP 1" deja existant)
         raw_nom = (attrs.get("nom") or "")
         nom = " ".join(str(raw_nom).split()).strip()
         if nom:
@@ -26,12 +26,11 @@ class SecteurSerializer(serializers.ModelSerializer):
                 qs = qs.exclude(pk=self.instance.pk)
             if qs.exists():
                 raise serializers.ValidationError(
-                    {"nom": "Ce secteur existe deja. Utilisez Modifier dans la liste des secteurs."}
+                    {"nom": "Ce secteur existe déjà. Utilisez Modifier dans la liste des secteurs."}
                 )
         return attrs
 
     def get_rendement_ha(self, obj):
-        # Rendement simple: regimes / ha (sur toute la production disponible dans le queryset annote)
         superficie = getattr(obj, "superficie_ha", None)
         prod = getattr(obj, "production_total", None)
         try:
@@ -39,7 +38,6 @@ class SecteurSerializer(serializers.ModelSerializer):
             prod_val = float(prod) if prod is not None else 0.0
         except Exception:
             return 0
-
         if superficie_val <= 0:
             return 0
         return round(prod_val / superficie_val, 4)

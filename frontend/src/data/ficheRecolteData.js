@@ -55,6 +55,7 @@ export const ficheRecolteInitial = {
   depenses: {
     nourriture: "",
     transport: "",
+    salaire: "",
   },
   // Recu de vente (1 par defaut, on peut en ajouter d'autres si besoin)
   recus: [

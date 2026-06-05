@@ -19,11 +19,38 @@ const COLORS = {
   red: "#d32f2f",
 };
 
+const PALETTE = [
+  "#2e7d32", "#1976d2", "#fbc02d", "#d32f2f", "#7b1fa2",
+  "#0097a7", "#f57c00", "#455a64", "#ad1457", "#558b2f",
+];
+
 const formatInt = (n) =>
   new Intl.NumberFormat("fr-FR", { maximumFractionDigits: 0 }).format(Number(n || 0));
 const formatFloat = (n) =>
   new Intl.NumberFormat("fr-FR", { maximumFractionDigits: 2 }).format(Number(n || 0));
 const formatMoney = (n) => `${formatInt(n)} FCFA`;
+
+// Injecte un tooltip.callbacks.label dans les options d'un graphique
+const addTooltip = (baseOpts, callbackFn) => ({
+  ...baseOpts,
+  plugins: {
+    ...baseOpts.plugins,
+    tooltip: {
+      ...(baseOpts.plugins?.tooltip || {}),
+      callbacks: { label: callbackFn },
+    },
+  },
+});
+
+const fmtRegimes   = (ctx) => `${ctx.dataset.label}: ${formatInt(ctx.parsed.y)} régimes`;
+const fmtFCFA      = (ctx) => `${ctx.dataset.label}: ${formatInt(ctx.parsed.y)} FCFA`;
+const fmtRendement = (ctx) => `${ctx.dataset.label}: ${formatFloat(ctx.parsed.y)} rég/ha`;
+const fmtMixed     = (ctx) => {
+  const lbl = (ctx.dataset.label || "").toLowerCase();
+  return lbl.includes("prod")
+    ? `${ctx.dataset.label}: ${formatInt(ctx.parsed.y)} régimes`
+    : `${ctx.dataset.label}: ${formatInt(ctx.parsed.y)} FCFA`;
+};
 
 const yearOptions = (() => {
   const y = new Date().getFullYear();
@@ -38,7 +65,8 @@ export default function DashboardPage() {
   const [showFilters, setShowFilters] = useState(false);
 
   const [year, setYear] = useState(new Date().getFullYear());
-  const [period, setPeriod] = useState("year"); // year | compare
+  const [period, setPeriod] = useState("year"); // year | compare | multi
+  const [multiYears, setMultiYears] = useState([new Date().getFullYear()]);
   const [secteur, setSecteur] = useState("");
   const [recolteur, setRecolteur] = useState("");
   const [regimeType, setRegimeType] = useState("");
@@ -68,11 +96,13 @@ export default function DashboardPage() {
   const loadSummary = async () => {
     try {
       setLoading(true);
+      const yearsParam = period === "multi" && multiYears.length > 0 ? multiYears.join(",") : String(year);
       const data = await getDashboardSummary({
         year,
         secteur: secteur || undefined,
         recolteur: recolteur || undefined,
         regime_type: regimeType || undefined,
+        years: yearsParam,
       });
       setSummary(data);
       setLastUpdatedAt(new Date());
@@ -83,10 +113,13 @@ export default function DashboardPage() {
     }
   };
 
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const multiYearsKey = multiYears.slice().sort().join(",");
+
   useEffect(() => {
     loadSummary();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [year, secteur, recolteur, regimeType]);
+  }, [year, secteur, recolteur, regimeType, period === "multi" ? multiYearsKey : ""]);
 
   const secteurLabel = useMemo(() => {
     if (!secteur) return "";
@@ -187,7 +220,7 @@ export default function DashboardPage() {
               },
             ],
           },
-          options: baseLineOptions,
+          options: addTooltip(baseLineOptions, fmtRegimes),
         };
       }
       const src = ch.production_annuelle;
@@ -207,7 +240,7 @@ export default function DashboardPage() {
             },
           ],
         },
-        options: baseLineOptions,
+        options: addTooltip(baseLineOptions, fmtRegimes),
       };
     })();
 
@@ -238,7 +271,7 @@ export default function DashboardPage() {
               },
             ],
           },
-          options: baseLineOptions,
+          options: addTooltip(baseLineOptions, fmtFCFA),
         };
       }
       const src = ch.montant_ventes_annuel;
@@ -258,7 +291,7 @@ export default function DashboardPage() {
             },
           ],
         },
-        options: baseLineOptions,
+        options: addTooltip(baseLineOptions, fmtFCFA),
       };
     })();
 
@@ -276,7 +309,7 @@ export default function DashboardPage() {
             ],
           },
           options: {
-            ...baseBarOptions,
+            ...addTooltip(baseBarOptions, fmtRegimes),
             onClick: (event, elements) => {
               if (!elements?.length) return;
               event?.native?.stopPropagation?.();
@@ -298,7 +331,7 @@ export default function DashboardPage() {
           ],
         },
         options: {
-          ...baseBarOptions,
+          ...addTooltip(baseBarOptions, fmtRegimes),
           onClick: (event, elements) => {
             if (!elements?.length) return;
             event?.native?.stopPropagation?.();
@@ -324,7 +357,7 @@ export default function DashboardPage() {
             ],
           },
           options: {
-            ...baseBarOptions,
+            ...addTooltip(baseBarOptions, fmtRegimes),
             onClick: (event, elements) => {
               if (!elements?.length) return;
               event?.native?.stopPropagation?.();
@@ -344,7 +377,7 @@ export default function DashboardPage() {
           datasets: [{ label: "Regimes", data: src.data, backgroundColor: COLORS.primary }],
         },
         options: {
-          ...baseBarOptions,
+          ...addTooltip(baseBarOptions, fmtRegimes),
           onClick: (event, elements) => {
             if (!elements?.length) return;
             event?.native?.stopPropagation?.();
@@ -370,7 +403,7 @@ export default function DashboardPage() {
             ],
           },
           options: {
-            ...baseBarOptions,
+            ...addTooltip(baseBarOptions, fmtRendement),
             onClick: (event, elements) => {
               if (!elements?.length) return;
               event?.native?.stopPropagation?.();
@@ -390,7 +423,7 @@ export default function DashboardPage() {
           datasets: [{ label: "Rendement", data: src.data, backgroundColor: "rgba(102,187,106,0.75)" }],
         },
         options: {
-          ...baseBarOptions,
+          ...addTooltip(baseBarOptions, fmtRendement),
           onClick: (event, elements) => {
             if (!elements?.length) return;
             event?.native?.stopPropagation?.();
@@ -418,7 +451,7 @@ export default function DashboardPage() {
               { label: `Depenses ${py}`, data: src.depenses_previous, borderColor: COLORS.earth, tension: 0.35 },
             ],
           },
-          options: { ...baseLineOptions, plugins: { ...baseLineOptions.plugins, legend: { position: "bottom" } } },
+          options: { ...addTooltip(baseLineOptions, fmtMixed), plugins: { ...addTooltip(baseLineOptions, fmtMixed).plugins, legend: { position: "bottom" } } },
         };
       }
 
@@ -446,7 +479,7 @@ export default function DashboardPage() {
             },
           ],
         },
-        options: baseLineOptions,
+        options: addTooltip(baseLineOptions, fmtMixed),
       };
     })();
 
@@ -463,7 +496,7 @@ export default function DashboardPage() {
               { label: String(py), data: src.previous, borderColor: COLORS.accent, tension: 0.35, fill: false },
             ],
           },
-          options: baseLineOptions,
+          options: addTooltip(baseLineOptions, fmtFCFA),
         };
       }
       const src = ch.cout_travaux_annuel;
@@ -476,7 +509,7 @@ export default function DashboardPage() {
             { label: "Cout", data: src.data, borderColor: COLORS.earth, backgroundColor: "rgba(109,76,65,0.10)", tension: 0.35, fill: true },
           ],
         },
-        options: baseLineOptions,
+        options: addTooltip(baseLineOptions, fmtFCFA),
       };
     })();
 
@@ -493,7 +526,7 @@ export default function DashboardPage() {
               { label: String(py), data: src.previous, backgroundColor: "rgba(251,192,45,0.55)" },
             ],
           },
-          options: baseBarOptions,
+          options: addTooltip(baseBarOptions, fmtFCFA),
         };
       }
       const src = ch.cout_travaux_par_nature;
@@ -504,7 +537,79 @@ export default function DashboardPage() {
           labels: src.labels,
           datasets: [{ label: "Cout", data: src.data, backgroundColor: "rgba(109,76,65,0.60)" }],
         },
-        options: baseBarOptions,
+        options: addTooltip(baseBarOptions, fmtFCFA),
+      };
+    })();
+
+    // Production par date (journalier)
+    const productionParDate = (() => {
+      const src = ch.production_par_date || { labels: [], data: [] };
+      return {
+        title: `Production par date (${yy})`,
+        type: "bar",
+        data: {
+          labels: src.labels,
+          datasets: [{ label: "Regimes", data: src.data, backgroundColor: "rgba(46,125,50,0.65)" }],
+        },
+        options: {
+          ...addTooltip(baseBarOptions, fmtRegimes),
+          scales: {
+            x: { grid: { display: false }, ticks: { maxRotation: 60, minRotation: 30 } },
+            y: { beginAtZero: true, ticks: { precision: 0 } },
+          },
+        },
+      };
+    })();
+
+    // Production multi-annees (mensuelle)
+    const productionMultiYears = (() => {
+      const series = ch.production_multi_years || [];
+      if (series.length === 0) return null;
+      const labels = series[0]?.labels || [];
+      return {
+        title: "Production mensuelle multi-annees",
+        type: "line",
+        data: {
+          labels,
+          datasets: series.map((s, i) => ({
+            label: String(s.year),
+            data: s.data,
+            borderColor: PALETTE[i % PALETTE.length],
+            backgroundColor: `${PALETTE[i % PALETTE.length]}22`,
+            tension: 0.35,
+            fill: false,
+          })),
+        },
+        options: addTooltip(baseLineOptions, fmtRegimes),
+      };
+    })();
+
+    // Production par secteur multi-annees
+    const productionSecteurMultiYears = (() => {
+      const series = ch.production_par_secteur_multi_years || [];
+      if (series.length === 0) return null;
+      const labels = series[0]?.labels || [];
+      return {
+        title: "Production par secteur multi-annees",
+        type: "bar",
+        data: {
+          labels,
+          datasets: series.map((s, i) => ({
+            label: String(s.year),
+            data: s.data,
+            backgroundColor: `${PALETTE[i % PALETTE.length]}99`,
+          })),
+        },
+        options: {
+          ...addTooltip(baseBarOptions, fmtRegimes),
+          onClick: (event, elements) => {
+            if (!elements?.length) return;
+            event?.native?.stopPropagation?.();
+            const idx = elements[0].index;
+            const id = series[0]?.ids?.[idx];
+            if (id) navigate(`/secteurs/${id}`);
+          },
+        },
       };
     })();
 
@@ -517,26 +622,38 @@ export default function DashboardPage() {
       depensesVsProduction,
       coutTravaux,
       coutTravauxNature,
+      productionParDate,
+      productionMultiYears,
+      productionSecteurMultiYears,
     };
   }, [summary, year, period, baseLineOptions, baseBarOptions, navigate]);
 
   const statsCards = useMemo(() => {
     const s = summary?.stats || {};
+    const regime = s.repartition_par_regime || {};
     return [
-      { title: "Production totale", value: `${formatInt(s.total_production)} regimes` },
-      { title: "Montant total ventes", value: formatMoney(s.montant_total_ventes) },
-      { title: "Depenses recolte", value: formatMoney(s.depenses_total_recolte) },
-      { title: "Cout total travaux", value: formatMoney(s.cout_total_travaux) },
-      { title: "Rendement moyen", value: `${formatFloat(s.rendement_moyen)} reg/ha` },
-      { title: "Recolteurs actifs", value: formatInt(s.recolteurs_actifs) },
-      { title: "Secteurs concernes", value: `${formatInt(s.secteurs_involved)} / ${formatInt(s.secteurs_count)}` },
-      { title: "Fiches recolte", value: formatInt(s.fiches_recolte_count) },
-      { title: "Fiches travaux", value: formatInt(s.fiches_travaux_count) },
+      { title: "Production totale (régimes)", value: `${formatInt(s.total_production)} rég.`, color: COLORS.primary },
+      { title: "Production totale (kg)", value: `${formatFloat(s.total_kg)} kg`, color: COLORS.primary },
+      { title: "Poids moyen / régime", value: s.poids_moyen_regime ? `${formatFloat(s.poids_moyen_regime)} kg` : "—", color: COLORS.secondary },
+      { title: "Chiffre d'affaires", value: formatMoney(s.montant_total_ventes), color: COLORS.blue },
+      { title: "Secteurs actifs", value: `${formatInt(s.secteurs_actifs)} / ${formatInt(s.secteurs_count)}`, color: COLORS.earth },
+      { title: "Récolteurs actifs", value: formatInt(s.recolteurs_actifs), color: COLORS.earth },
+      { title: "Rendement moyen", value: s.rendement_moyen ? `${formatFloat(s.rendement_moyen)} rég/ha` : "—", color: COLORS.accent },
+      {
+        title: "Répartition régimes",
+        value: `${formatInt(regime.grands + regime.moyens + regime.petits)} rég.`,
+        sub: `Grands : ${formatInt(regime.grands)} · Moyens : ${formatInt(regime.moyens)} · Petits : ${formatInt(regime.petits)}`,
+        color: COLORS.secondary,
+      },
+      {
+        title: "Dépenses totales",
+        value: formatMoney(s.depenses_totales),
+        color: COLORS.red,
+        sub: `Nourrit.+Transport : ${formatMoney(s.depenses_total_recolte)} · Salaires : ${formatMoney(s.depenses_salaires_recolteurs)}`,
+      },
     ];
   }, [summary]);
 
-  const primaryStats = useMemo(() => statsCards.slice(0, 4), [statsCards]);
-  const secondaryStats = useMemo(() => statsCards.slice(4), [statsCards]);
 
   return (
     <div className="page dashboard">
@@ -597,7 +714,7 @@ export default function DashboardPage() {
                 onChange={(v) => setRecolteur(String(v || ""))}
                 options={(recolteurs || []).map((r) => ({
                   value: String(r.id),
-                  label: `${r.code ? `${r.code} - ` : ""}${r.nom}`,
+                  label: `${r.numero_telephone ? `${r.numero_telephone} - ` : ""}${r.nom}`,
                 }))}
                 placeholder="Tous"
                 clearable
@@ -649,37 +766,67 @@ export default function DashboardPage() {
           >
             Comparaison {year}/{year - 1}
           </button>
+          <button
+            className={`filter-btn ${period === "multi" ? "active" : ""}`}
+            onClick={() => { setPeriod("multi"); setMultiYears([year]); }}
+          >
+            Multi-annees
+          </button>
         </div>
       </div>
 
+      {period === "multi" && (
+        <section className="filter-panel multi-year-panel">
+          <p style={{ margin: "0 0 8px", fontWeight: 600 }}>Selectionner les annees a comparer :</p>
+          <div className="filter-row" style={{ flexWrap: "wrap", gap: 10 }}>
+            {yearOptions.map((y) => (
+              <label key={y} className="checkbox-label" style={{ minWidth: 60 }}>
+                <input
+                  type="checkbox"
+                  checked={multiYears.includes(y)}
+                  onChange={(e) => {
+                    setMultiYears((prev) =>
+                      e.target.checked ? [...prev, y] : prev.filter((v) => v !== y)
+                    );
+                  }}
+                />
+                <span>{y}</span>
+              </label>
+            ))}
+          </div>
+          {multiYears.length === 0 && (
+            <p className="field-error" style={{ marginTop: 6 }}>Selectionner au moins une annee</p>
+          )}
+        </section>
+      )}
+
       <section className="stats-grid" aria-busy={loading ? "true" : "false"}>
-        {primaryStats.map((s) => (
-          <article key={s.title} className="stat-card">
-            <h3>{s.title}</h3>
-            <p>{loading ? "..." : s.value}</p>
+        {statsCards.map((s) => (
+          <article
+            key={s.title}
+            className="stat-card"
+            style={{ borderTop: `4px solid ${s.color || "#2e7d32"}` }}
+          >
+            <h3 style={{ color: "#555", fontSize: 12, fontWeight: 600, textTransform: "uppercase", margin: "0 0 6px" }}>
+              {s.title}
+            </h3>
+            <p style={{ fontSize: 22, fontWeight: 700, margin: 0, color: s.color || "#222" }}>
+              {loading ? "…" : s.value}
+            </p>
+            {s.sub && !loading && (
+              <p style={{ fontSize: 11, color: "#888", margin: "4px 0 0", lineHeight: 1.4 }}>
+                {s.sub}
+              </p>
+            )}
           </article>
         ))}
       </section>
-
-      {secondaryStats.length > 0 && (
-        <details className="kpi-details">
-          <summary>Autres indicateurs</summary>
-          <div className="kpi-mini-grid">
-            {secondaryStats.map((s) => (
-              <article key={s.title} className="stat-card">
-                <h3>{s.title}</h3>
-                <p>{loading ? "..." : s.value}</p>
-              </article>
-            ))}
-          </div>
-        </details>
-      )}
 
       {loading ? (
         <LogoLoader label="Chargement du dashboard..." />
       ) : (
         <>
-          {tab === "overview" && (
+          {tab === "overview" && period !== "multi" && (
             <section className="charts-grid">
               <ChartCard
                 title={charts.production?.title || "Production"}
@@ -716,8 +863,38 @@ export default function DashboardPage() {
             </section>
           )}
 
+          {tab === "overview" && period === "multi" && (
+            <section className="charts-grid">
+              {charts.productionMultiYears && (
+                <ChartCard
+                  title={charts.productionMultiYears.title}
+                  type={charts.productionMultiYears.type}
+                  data={charts.productionMultiYears.data}
+                  options={charts.productionMultiYears.options}
+                  onClick={() => setActiveChart(charts.productionMultiYears)}
+                />
+              )}
+              {charts.productionSecteurMultiYears && (
+                <ChartCard
+                  title={charts.productionSecteurMultiYears.title}
+                  type={charts.productionSecteurMultiYears.type}
+                  data={charts.productionSecteurMultiYears.data}
+                  options={charts.productionSecteurMultiYears.options}
+                  onClick={() => setActiveChart(charts.productionSecteurMultiYears)}
+                />
+              )}
+            </section>
+          )}
+
           {tab === "analysis" && (
             <section className="charts-grid">
+              <ChartCard
+                title={charts.productionParDate?.title || "Production par date"}
+                type={charts.productionParDate?.type || "bar"}
+                data={charts.productionParDate?.data || { labels: [], datasets: [] }}
+                options={charts.productionParDate?.options}
+                onClick={() => charts.productionParDate && setActiveChart(charts.productionParDate)}
+              />
               <ChartCard
                 title={charts.rendementSecteurs?.title || "Rendement par secteur"}
                 type={charts.rendementSecteurs?.type || "bar"}

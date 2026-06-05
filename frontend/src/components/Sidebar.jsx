@@ -1,16 +1,22 @@
 import { NavLink, useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext.jsx";
+import NotificationBell from "./NotificationBell.jsx";
 import logo from "../assets/logo.png";
 
-// Barre de navigation en haut pour gagner de l'espace
 export default function Sidebar({ isNavigating = false }) {
-  const { user, logout } = useAuth();
+  const { user, isAdmin, isSuperviseur, logout } = useAuth();
   const navigate = useNavigate();
 
   const handleLogout = () => {
     logout();
     navigate("/login");
   };
+
+  const navLink = (to, label) => (
+    <NavLink to={to} className={({ isActive }) => (isActive ? "active" : "")}>
+      {label}
+    </NavLink>
+  );
 
   return (
     <header className="topbar">
@@ -22,19 +28,32 @@ export default function Sidebar({ isNavigating = false }) {
         <span>Palmeraie</span>
       </div>
 
-      {/* Navigation principale */}
+      {/* Navigation — filtrée par rôle */}
       <nav className="topbar-nav">
-        <NavLink to="/dashboard" className={({ isActive }) => (isActive ? "active" : "")}>Dashboard</NavLink>
-        <NavLink to="/secteurs" className={({ isActive }) => (isActive ? "active" : "")}>Secteurs</NavLink>
-        <NavLink to="/recolteurs" className={({ isActive }) => (isActive ? "active" : "")}>Recolteurs</NavLink>
-        <NavLink to="/recoltes" className={({ isActive }) => (isActive ? "active" : "")}>Recoltes</NavLink>
-        <NavLink to="/travaux" className={({ isActive }) => (isActive ? "active" : "")}>Travaux</NavLink>
-        <NavLink to="/materiels" className={({ isActive }) => (isActive ? "active" : "")}>Materiels</NavLink>
+        {navLink("/dashboard", "Dashboard")}
+
+        {/* Admin uniquement : vue globale des secteurs, récolteurs, exports */}
+        {isAdmin && navLink("/secteurs", "Secteurs")}
+        {isAdmin && navLink("/recolteurs", "Recolteurs")}
+
+        {/* Les deux rôles peuvent accéder aux récoltes et travaux (filtrés côté API) */}
+        {navLink("/recoltes", "Recoltes")}
+        {navLink("/travaux", "Travaux")}
+
+        {/* Admin uniquement : matériels, utilisateurs */}
+        {isAdmin && navLink("/materiels", "Materiels")}
+        {isAdmin && navLink("/utilisateurs", "Utilisateurs")}
       </nav>
 
-      {/* Zone info (placeholder) */}
+      {/* Zone info utilisateur */}
       <div className="topbar-info">
-        <span>{user?.username || "Admin"}</span>
+        <NotificationBell />
+        <span className={`role-badge role-badge--${isAdmin ? "admin" : "superviseur"}`}>
+          {isAdmin ? "Admin" : "Superviseur"}
+        </span>
+        <NavLink to="/profil" className={({ isActive }) => `topbar-username ${isActive ? "active" : ""}`}>
+          {user?.username || "—"}
+        </NavLink>
         <button className="btn-ghost btn-mini" onClick={handleLogout}>
           Deconnexion
         </button>

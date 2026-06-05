@@ -10,8 +10,12 @@ import DetailRecolteur from "./pages/recolteurs/DetailRecolteur.jsx";
 import HistoriqueRecoltes from "./pages/recoltes/HistoriqueRecoltes.jsx";
 import HistoriqueTravaux from "./pages/travaux/HistoriqueTravaux.jsx";
 import ListeMateriels from "./pages/materiels/ListeMateriels.jsx";
+import GestionUtilisateurs from "./pages/admin/GestionUtilisateurs.jsx";
 import LoginPage from "./pages/auth/LoginPage.jsx";
+import ChangePasswordPage from "./pages/auth/ChangePasswordPage.jsx";
+import MonProfilPage from "./pages/auth/MonProfilPage.jsx";
 import ProtectedRoute from "./routes/ProtectedRoute.jsx";
+import AdminRoute from "./routes/AdminRoute.jsx";
 import { apiGet } from "./api/axios.js";
 import { useToast } from "./context/ToastContext.jsx";
 
@@ -77,20 +81,30 @@ export default function App(){
           {/* Route publique */}
           <Route path="/login" element={<LoginPage />} />
 
-          {/* Routes protegees */}
+          {/* Routes protegees (tous les utilisateurs connectes) */}
           <Route element={<ProtectedRoute />}>
-          <Route element={<MainLayout />}>
-            <Route index element={<Navigate to="/dashboard" replace />}/>
-            <Route path="/dashboard" element={<DashboardPage />}/>
-            <Route path="/secteurs" element={<ListeSecteurs  />}/>
-            <Route path="/secteurs/:id" element={<DetailSecteur />}/>
-            <Route path="/recolteurs" element={<ListeRecolteurs  />}/>
-            <Route path="/recolteurs/:id" element={<DetailRecolteur />}/>
-            <Route path="/recoltes" element={<HistoriqueRecoltes  />}/>
-            <Route path="/travaux" element={<HistoriqueTravaux  />}/>
-            <Route path="/materiels" element={<ListeMateriels  />}/>
+            {/* Changement de mot de passe obligatoire (hors MainLayout) */}
+            <Route path="/changer-mot-de-passe" element={<ChangePasswordPage />} />
+
+            <Route element={<MainLayout />}>
+              <Route index element={<Navigate to="/dashboard" replace />}/>
+              <Route path="/dashboard" element={<DashboardPage />}/>
+              {/* Accessible aux deux roles — l'API filtre selon le role */}
+              <Route path="/profil" element={<MonProfilPage />}/>
+              <Route path="/recoltes" element={<HistoriqueRecoltes />}/>
+              <Route path="/travaux" element={<HistoriqueTravaux />}/>
+
+              {/* Routes admin uniquement */}
+              <Route element={<AdminRoute />}>
+                <Route path="/secteurs" element={<ListeSecteurs />}/>
+                <Route path="/secteurs/:id" element={<DetailSecteur />}/>
+                <Route path="/recolteurs" element={<ListeRecolteurs />}/>
+                <Route path="/recolteurs/:id" element={<DetailRecolteur />}/>
+                <Route path="/materiels" element={<ListeMateriels />}/>
+                <Route path="/utilisateurs" element={<GestionUtilisateurs />}/>
+              </Route>
+            </Route>
           </Route>
-        </Route>
 
         {/* Fallback */}
         <Route path="*" element={<Navigate to="/login" replace />} />

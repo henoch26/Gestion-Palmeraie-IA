@@ -17,7 +17,7 @@ export default function FicheTravauxDialog({ open, onClose, fiche }) {
 
         <div className="fiche-dialog-grid">
           <div><strong>Superviseur:</strong> {fiche.superviseur_travaux || "-"}</div>
-          <div><strong>Nature:</strong> {fiche.nature_travaux || "-"}</div>
+          <div><strong>Nature:</strong> {fiche.nature_travaux_display || fiche.nature_travaux || "-"}</div>
           <div><strong>Periode:</strong> {fiche.periode_travaux || "-"}</div>
           <div><strong>Superficie (ha):</strong> {fiche.superficie_couverte_ha ?? "-"}</div>
           <div><strong>Nb personnes:</strong> {fiche.nb_personnes ?? "-"}</div>

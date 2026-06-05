@@ -1,6 +1,7 @@
 from django.db import transaction
 from rest_framework import serializers
 from .models import (
+    Client,
     FicheRecolte,
     SuperviseurAdjoint,
     FicheRecolteLigne,
@@ -9,10 +10,28 @@ from .models import (
 )
 
 
+class ClientSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Client
+        fields = ["id", "nom", "telephone", "adresse", "created_at"]
+        read_only_fields = ["created_at"]
+
+    def validate_nom(self, value):
+        value = " ".join(value.split()).strip()
+        if not value:
+            raise serializers.ValidationError("Le nom est requis.")
+        qs = Client.objects.filter(nom__iexact=value)
+        if self.instance:
+            qs = qs.exclude(pk=self.instance.pk)
+        if qs.exists():
+            raise serializers.ValidationError("Ce client existe déjà.")
+        return value
+
+
 class SuperviseurAdjointSerializer(serializers.ModelSerializer):
     class Meta:
         model = SuperviseurAdjoint
-        fields = ["id", "nom", "secteur_ou_recolteur"]
+        fields = ["id", "nom", "secteur_ou_recolteur", "matricule", "telephone"]
 
 
 class FicheRecolteDetailSerializer(serializers.ModelSerializer):
@@ -20,7 +39,7 @@ class FicheRecolteDetailSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = FicheRecolteDetail
-        fields = ["id", "secteur", "secteur_code", "quantite"]
+        fields = ["id", "secteur", "secteur_code", "quantite", "coordonnees_GPS_palmier", "qualite_regime"]
 
 
 class FicheRecolteLigneSerializer(serializers.ModelSerializer):
@@ -39,20 +58,20 @@ class FicheRecolteLigneSerializer(serializers.ModelSerializer):
             "regime_type",
             "total_regimes",
             "prix_fcfa",
+            "salaire_calcule",
+            "prime_qualite",
+            "nb_heures_travail",
             "details",
         ]
 
     def get_total_regimes(self, obj):
-        # Somme des quantites par ligne
         return sum(int(d.quantite or 0) for d in obj.details.all())
 
     def get_prix_fcfa(self, obj):
-        # Prix calcule: total regimes * bareme du jour (fiche)
         total = self.get_total_regimes(obj)
         fiche = getattr(obj, "fiche", None)
         if not fiche:
             return 0
-
         rates = {
             "grands": int(getattr(fiche, "bareme_grands", 0) or 0),
             "moyens": int(getattr(fiche, "bareme_moyens", 0) or 0),
@@ -61,7 +80,6 @@ class FicheRecolteLigneSerializer(serializers.ModelSerializer):
         return int(total) * int(rates.get(obj.regime_type, 0) or 0)
 
     def validate(self, attrs):
-        # Au moins un identifiant de recolteur
         if not attrs.get("recolteur") and not attrs.get("recolteur_nom"):
             raise serializers.ValidationError("recolteur ou recolteur_nom requis")
         return attrs
@@ -69,8 +87,6 @@ class FicheRecolteLigneSerializer(serializers.ModelSerializer):
 
 class FicheRecuVenteSerializer(serializers.ModelSerializer):
     def validate(self, attrs):
-        # Si un recu est saisi, on exige au minimum: date + montant
-        # (un recu totalement vide est ignore au moment de la creation/update).
         d = attrs.get("date")
         client = (attrs.get("client") or "").strip()
         pesee = attrs.get("pesee_kg") or 0
@@ -95,20 +111,40 @@ class FicheRecuVenteSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = FicheRecuVente
-        fields = ["id", "date", "client", "pesee_kg", "non_conformes_pct", "montant"]
+        fields = [
+            "id", "date", "client", "pesee_kg", "non_conformes_pct", "montant",
+            "reference_facture", "mode_paiement", "vehicule_transport",
+        ]
 
 
 class FicheRecolteSerializer(serializers.ModelSerializer):
     superviseurs_adjoints = SuperviseurAdjointSerializer(many=True, required=False)
     lignes = FicheRecolteLigneSerializer(many=True, required=False)
     recus = FicheRecuVenteSerializer(many=True, required=False)
+    created_by_username = serializers.CharField(source="created_by.username", read_only=True)
+    statut_display = serializers.CharField(source="get_statut_display", read_only=True)
+
+    # Champs financiers — masqués pour les non-admin
+    CHAMPS_ADMIN = {
+        "bareme_grands", "bareme_moyens", "bareme_petits",
+        "depense_nourriture", "depense_transport", "depense_salaire",
+        "depense_total", "recus",
+    }
 
     class Meta:
         model = FicheRecolte
         fields = "__all__"
+        read_only_fields = ["created_by", "created_at", "depense_total"]
+
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        request = self.context.get("request")
+        if request and hasattr(request.user, "profile") and request.user.profile.is_superviseur:
+            for champ in self.CHAMPS_ADMIN:
+                data.pop(champ, None)
+        return data
 
     def validate(self, attrs):
-        # Champs indispensables
         if not (attrs.get("superviseur_general") or "").strip():
             raise serializers.ValidationError(
                 {"superviseur_general": "Superviseur general requis"}
@@ -123,21 +159,17 @@ class FicheRecolteSerializer(serializers.ModelSerializer):
         has_any_qty = False
         for ligne in lignes:
             for det in (ligne.get("details") or []):
-                q = det.get("quantite") or 0
                 try:
-                    qv = int(q)
+                    if int(det.get("quantite") or 0) > 0:
+                        has_any_qty = True
+                        break
                 except Exception:
-                    qv = 0
-                if qv > 0:
-                    has_any_qty = True
-                    break
+                    pass
             if has_any_qty:
                 break
 
         if not has_any_qty:
-            raise serializers.ValidationError(
-                {"lignes": "Saisis au moins une quantite > 0"}
-            )
+            raise serializers.ValidationError({"lignes": "Saisis au moins une quantite > 0"})
 
         return attrs
 
@@ -149,23 +181,17 @@ class FicheRecolteSerializer(serializers.ModelSerializer):
 
         fiche = FicheRecolte.objects.create(**validated_data)
 
-        # Superviseurs adjoints
         for sup in superviseurs_data:
             SuperviseurAdjoint.objects.create(fiche=fiche, **sup)
 
-        # Lignes + details
         for ligne in lignes_data:
             details = ligne.pop("details", [])
-            # On garde uniquement les details avec une quantite > 0
             details = [d for d in details if int(d.get("quantite") or 0) > 0]
             if not details:
                 continue
-
-            # Snapshot du nom si recolteur existe
             recolteur = ligne.get("recolteur")
             if recolteur and not ligne.get("recolteur_nom"):
                 ligne["recolteur_nom"] = recolteur.nom
-
             line = FicheRecolteLigne.objects.create(fiche=fiche, **ligne)
             for det in details:
                 secteur = det.get("secteur")
@@ -173,7 +199,6 @@ class FicheRecolteSerializer(serializers.ModelSerializer):
                     det["secteur_code"] = secteur.code
                 FicheRecolteDetail.objects.create(ligne=line, **det)
 
-        # Recus de vente
         for recu in recus_data:
             d = recu.get("date")
             client = (recu.get("client") or "").strip()
@@ -181,15 +206,13 @@ class FicheRecolteSerializer(serializers.ModelSerializer):
             non_conf = recu.get("non_conformes_pct") or 0
             montant = recu.get("montant") or 0
             is_empty = (
-                (not d)
-                and (not client)
+                (not d) and (not client)
                 and float(pesee or 0) == 0.0
                 and float(non_conf or 0) == 0.0
                 and float(montant or 0) == 0.0
             )
-            if is_empty:
-                continue
-            FicheRecuVente.objects.create(fiche=fiche, **recu)
+            if not is_empty:
+                FicheRecuVente.objects.create(fiche=fiche, **recu)
 
         return fiche
 
@@ -199,12 +222,10 @@ class FicheRecolteSerializer(serializers.ModelSerializer):
         lignes_data = validated_data.pop("lignes", None)
         recus_data = validated_data.pop("recus", None)
 
-        # Mise a jour des champs simples
         for attr, value in validated_data.items():
             setattr(instance, attr, value)
         instance.save()
 
-        # Remplacement complet des listes si fournies
         if superviseurs_data is not None:
             instance.superviseurs_adjoints.all().delete()
             for sup in superviseurs_data:
@@ -236,14 +257,12 @@ class FicheRecolteSerializer(serializers.ModelSerializer):
                 non_conf = recu.get("non_conformes_pct") or 0
                 montant = recu.get("montant") or 0
                 is_empty = (
-                    (not d)
-                    and (not client)
+                    (not d) and (not client)
                     and float(pesee or 0) == 0.0
                     and float(non_conf or 0) == 0.0
                     and float(montant or 0) == 0.0
                 )
-                if is_empty:
-                    continue
-                FicheRecuVente.objects.create(fiche=instance, **recu)
+                if not is_empty:
+                    FicheRecuVente.objects.create(fiche=instance, **recu)
 
         return instance

@@ -44,3 +44,46 @@ export function getToken() {
   const stored = getStoredAuth();
   return stored?.token || null;
 }
+
+// Mise à jour du profil (prénom, nom, email, téléphone)
+export async function updateProfile(data) {
+  const token = getToken();
+  const res = await fetch(`${API_BASE}/auth/profile/`, {
+    method: "PATCH",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Token ${token}`,
+    },
+    body: JSON.stringify(data),
+  });
+  const json = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(json.detail || "Erreur lors de la mise à jour du profil");
+  updateStoredAuth({ token: getToken(), ...json });
+  return json;
+}
+
+// Mise à jour du stockage local (ex. après changement de mot de passe)
+export function updateStoredAuth(data) {
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+}
+
+// Changement de mot de passe
+export async function changePassword({ currentPassword, newPassword }) {
+  const token = getToken();
+  const res = await fetch(`${API_BASE}/auth/change-password/`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Token ${token}`,
+    },
+    body: JSON.stringify({ current_password: currentPassword, new_password: newPassword }),
+  });
+
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    throw new Error(data.detail || "Erreur lors du changement de mot de passe");
+  }
+
+  updateStoredAuth(data);
+  return data;
+}
