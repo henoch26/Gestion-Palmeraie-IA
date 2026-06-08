@@ -2,13 +2,43 @@ import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import ChartCard from "../../components/ChartCard.jsx";
 import ChartDialog from "../../components/ChartDialog.jsx";
-import DataTable from "../../components/DataTable.jsx";
 import LogoLoader from "../../components/LogoLoader.jsx";
 import { useToast } from "../../context/ToastContext.jsx";
 import { getSecteurAnalytics } from "../../services/secteurService.js";
 import { getToken } from "../../services/authService.js";
 
 const API_BASE = import.meta.env.VITE_API_URL || "http://127.0.0.1:8000/api";
+
+const C = {
+  green:  "#2E7D32",
+  blue:   "#1565C0",
+  amber:  "#F9A825",
+  teal:   "#00695C",
+  purple: "#6A1B9A",
+  red:    "#C62828",
+};
+
+function fmtInt(v) {
+  return v == null ? "—" : Number(v).toLocaleString("fr-FR");
+}
+function fmtDec(v, d = 2) {
+  return v == null ? "—" : Number(v).toFixed(d);
+}
+
+function KpiCard({ label, value, sub, color = C.green }) {
+  return (
+    <article className="stat-card" style={{ borderTop: `3px solid ${color}`, padding: "10px 12px" }}>
+      <h3 style={{ color: "#888", fontSize: 10, fontWeight: 700, textTransform: "uppercase", margin: "0 0 3px", letterSpacing: ".5px", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+        {label}
+      </h3>
+      <p style={{ fontSize: 17, fontWeight: 700, margin: 0, color }}>{value}</p>
+      {sub && <p style={{ fontSize: 11, color: "#999", margin: "2px 0 0" }}>{sub}</p>}
+    </article>
+  );
+}
+
+const GRP_LBL = { fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".5px", color: "#999", margin: "16px 0 6px" };
+const G3 = { display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 10, marginBottom: 4 };
 
 export default function DetailSecteur() {
   const { id } = useParams();
@@ -60,30 +90,307 @@ export default function DetailSecteur() {
     }
   };
 
+  const MOIS = ["Jan","Fev","Mar","Avr","Mai","Juin","Juil","Aout","Sept","Oct","Nov","Dec"];
+  const fmtFicheDate = (dateStr) => {
+    const [, m, d] = dateStr.split("-");
+    return `${d} ${MOIS[parseInt(m, 10) - 1]}`;
+  };
+
   const monthlyChart = useMemo(() => {
     if (!data) return null;
+    const today = new Date();
+    const monthCount = data.year === today.getFullYear() ? today.getMonth() + 1 : 12;
+    const maskFuture = (arr) => (arr || []).map((v, i) => (i < monthCount ? v : null));
+
+    const monthlyLabelsPlugin = {
+      id: "monthlyBarLabels",
+      afterDatasetsDraw(chart) {
+        const { ctx } = chart;
+        chart.data.datasets.forEach((dataset, di) => {
+          const meta = chart.getDatasetMeta(di);
+          if (meta.hidden) return;
+          meta.data.forEach((bar, i) => {
+            const value = Number(dataset.data[i]) || 0;
+            if (!value) return;
+            const { x, y } = bar.getProps(["x", "y"], true);
+            ctx.save();
+            ctx.translate(x, y - 4);
+            ctx.rotate(-Math.PI / 2);
+            ctx.fillStyle = "#333";
+            ctx.textAlign = "left";
+            ctx.textBaseline = "middle";
+            ctx.font = "bold 9px sans-serif";
+            ctx.fillText(fmtInt(value), 0, 0);
+            ctx.restore();
+          });
+        });
+      },
+    };
+
     return {
-      title: "Evolution mensuelle (annee vs precedente)",
-      type: "line",
+      title: "Production mensuelle — comparaison 3 ans",
+      type: "bar",
       data: {
         labels: data.monthly.current.labels,
         datasets: [
-          { label: `${data.year}`, data: data.monthly.current.data, borderColor: "#2E7D32" },
-          { label: `${data.year - 1}`, data: data.monthly.previous.data, borderColor: "#FBC02D", borderDash: [4, 4] },
+          { label: `${data.year}`,     data: maskFuture(data.monthly.current.data), backgroundColor: `${C.green}bb` },
+          { label: `${data.year - 1}`, data: data.monthly.previous.data || [],       backgroundColor: `${C.blue}bb`  },
+          { label: `${data.year - 2}`, data: data.monthly.prev2?.data   || [],       backgroundColor: `${C.amber}bb` },
         ],
       },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        layout: { padding: { top: 45 } },
+        plugins: {
+          legend: { position: "bottom" },
+          subtitle: {
+            display: true,
+            text: "en nombre de regimes",
+            color: "#999",
+            font: { size: 11, style: "italic" },
+            padding: { bottom: 6 },
+          },
+          tooltip: { callbacks: { label: (ctx) => `${ctx.dataset.label} : ${fmtInt(ctx.parsed.y)} reg.` } },
+        },
+        scales: {
+          x: { grid: { display: false } },
+          y: { beginAtZero: true, ticks: { precision: 0 } },
+        },
+      },
+      plugins: [monthlyLabelsPlugin],
+    };
+  }, [data]);
+
+  const fichesChart = useMemo(() => {
+    const fiches = data?.fiches_annee;
+    if (!fiches?.length) return null;
+    const sec = data.secteur;
+
+    const fichesLabelsPlugin = {
+      id: "fichesBarLabels",
+      afterDatasetsDraw(chart) {
+        const { ctx } = chart;
+        chart.data.datasets.forEach((dataset, di) => {
+          const meta = chart.getDatasetMeta(di);
+          if (meta.hidden) return;
+          meta.data.forEach((bar, i) => {
+            const value = Number(dataset.data[i]) || 0;
+            if (!value) return;
+            const { x, y } = bar.getProps(["x", "y"], true);
+            ctx.save();
+            ctx.translate(x, y - 4);
+            ctx.rotate(-Math.PI / 2);
+            ctx.fillStyle = "#333";
+            ctx.textAlign = "left";
+            ctx.textBaseline = "middle";
+            ctx.font = "bold 9px sans-serif";
+            ctx.fillText(fmtInt(value), 0, 0);
+            ctx.restore();
+          });
+        });
+      },
+    };
+
+    return {
+      title: `Fiches de recolte — Secteur ${sec.code} / ${sec.nom} (${data.year})`,
+      type: "bar",
+      data: {
+        labels: fiches.map((f) => fmtFicheDate(f.date)),
+        datasets: [{
+          label: "Regimes recoltés",
+          data: fiches.map((f) => f.total_regimes),
+          backgroundColor: `${C.teal}bb`,
+        }],
+      },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        layout: { padding: { top: 45 } },
+        plugins: {
+          legend: { position: "bottom" },
+          subtitle: {
+            display: true,
+            text: "en nombre de regimes",
+            color: "#999",
+            font: { size: 11, style: "italic" },
+            padding: { bottom: 6 },
+          },
+          tooltip: { callbacks: { label: (ctx) => `${ctx.dataset.label} : ${fmtInt(ctx.parsed.y)} reg.` } },
+        },
+        scales: {
+          x: { grid: { display: false }, ticks: { maxRotation: 45, minRotation: 30 } },
+          y: { beginAtZero: true, ticks: { precision: 0 } },
+        },
+      },
+      plugins: [fichesLabelsPlugin],
     };
   }, [data]);
 
   const yearlyChart = useMemo(() => {
     if (!data) return null;
+    const yearly = data.yearly;
+    const nYears = yearly.labels.length;
+
+    const yearlyStackedPlugin = {
+      id: "yearlyStackedLabels",
+      afterDatasetsDraw(chart) {
+        const { ctx } = chart;
+        const datasets = chart.data.datasets;
+
+        // Valeur sur chaque bande
+        datasets.forEach((dataset, di) => {
+          const meta = chart.getDatasetMeta(di);
+          if (meta.hidden) return;
+          meta.data.forEach((bar, i) => {
+            const value = Number(dataset.data[i]) || 0;
+            if (!value) return;
+            const { x, y, base } = bar.getProps(["x", "y", "base"], true);
+            const segH = Math.abs(base - y);
+            if (segH < 18) return;
+            ctx.save();
+            ctx.fillStyle = "#fff";
+            ctx.textAlign = "center";
+            ctx.textBaseline = "middle";
+            ctx.font = "bold 10px sans-serif";
+            ctx.shadowColor = "rgba(0,0,0,0.4)";
+            ctx.shadowBlur = 3;
+            ctx.fillText(fmtInt(value), x, (y + base) / 2);
+            ctx.restore();
+          });
+        });
+
+        // Total au-dessus de chaque barre
+        for (let i = 0; i < nYears; i++) {
+          let total = 0;
+          let topY = Infinity;
+          datasets.forEach((ds, di) => {
+            const meta = chart.getDatasetMeta(di);
+            if (meta.hidden) return;
+            total += Number(ds.data[i]) || 0;
+            const { y } = meta.data[i].getProps(["y"], true);
+            if (y < topY) topY = y;
+          });
+          if (!total) continue;
+          const { x } = chart.getDatasetMeta(0).data[i].getProps(["x"], true);
+          ctx.save();
+          ctx.fillStyle = "#1f4e79";
+          ctx.textAlign = "center";
+          ctx.textBaseline = "bottom";
+          ctx.font = "bold 11px sans-serif";
+          ctx.fillText(fmtInt(total), x, topY - 4);
+          ctx.restore();
+        }
+      },
+    };
+
     return {
-      title: "Production par annee (5 ans)",
+      title: `Production par annee (5 ans) — ${data.secteur.code}`,
       type: "bar",
       data: {
-        labels: data.yearly.labels,
-        datasets: [{ label: "Total regimes", data: data.yearly.data, backgroundColor: "#66BB6A" }],
+        labels: yearly.labels.map(String),
+        datasets: [
+          { label: "Grands", data: yearly.grands || [], backgroundColor: `${C.green}cc`, stack: "regimes" },
+          { label: "Moyens", data: yearly.moyens || [], backgroundColor: `${C.blue}cc`,  stack: "regimes" },
+          { label: "Petits", data: yearly.petits || [], backgroundColor: `${C.amber}cc`, stack: "regimes" },
+        ],
       },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        layout: { padding: { top: 20 } },
+        plugins: {
+          legend: { position: "bottom" },
+          subtitle: {
+            display: true,
+            text: "en nombre de regimes",
+            color: "#999",
+            font: { size: 11, style: "italic" },
+            padding: { bottom: 6 },
+          },
+          tooltip: { callbacks: { label: (ctx) => `${ctx.dataset.label} : ${fmtInt(ctx.parsed.y)} reg.` } },
+        },
+        scales: {
+          x: { stacked: true, grid: { display: false } },
+          y: { stacked: true, beginAtZero: true, ticks: { precision: 0 } },
+        },
+      },
+      plugins: [yearlyStackedPlugin],
+    };
+  }, [data]);
+
+  const repartitionChart = useMemo(() => {
+    if (!data?.stats?.regime_breakdown) return null;
+    const { grands, moyens, petits } = data.stats.regime_breakdown;
+    if (!grands && !moyens && !petits) return null;
+
+    const values = [grands, moyens, petits];
+    const total  = values.reduce((a, b) => a + b, 0);
+
+    const labelsPlugin = {
+      id: "regimeLabels",
+      afterDatasetsDraw(chart) {
+        const { ctx } = chart;
+        const meta = chart.getDatasetMeta(0);
+        if (!total) return;
+        ctx.save();
+
+        // Étiquettes sur chaque part
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        meta.data.forEach((arc, i) => {
+          const value = values[i];
+          if (!value) return;
+          const pct = Math.round((value / total) * 100);
+          const pos = arc.tooltipPosition();
+          ctx.fillStyle = "#fff";
+          ctx.font = "bold 13px sans-serif";
+          ctx.fillText(fmtInt(value), pos.x, pos.y - 7);
+          ctx.font = "11px sans-serif";
+          ctx.fillText(`${pct}%`, pos.x, pos.y + 8);
+        });
+
+        // Total au centre du doughnut
+        const cx = (chart.chartArea.left + chart.chartArea.right) / 2;
+        const cy = (chart.chartArea.top  + chart.chartArea.bottom) / 2;
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.fillStyle = "#888";
+        ctx.font = "bold 10px sans-serif";
+        ctx.fillText("TOTAL", cx, cy - 12);
+        ctx.fillStyle = "#222";
+        ctx.font = "bold 18px sans-serif";
+        ctx.fillText(fmtInt(total), cx, cy + 4);
+        ctx.fillStyle = "#aaa";
+        ctx.font = "10px sans-serif";
+        ctx.fillText("regimes", cx, cy + 18);
+
+        ctx.restore();
+      },
+    };
+
+    const sec = data.secteur;
+    return {
+      title: `Secteur ${sec.code} — ${sec.nom} : repartition par type (${data.year})`,
+      type: "doughnut",
+      data: {
+        labels: ["Grands", "Moyens", "Petits"],
+        datasets: [{
+          data: [grands, moyens, petits],
+          backgroundColor: [`${C.green}cc`, `${C.blue}cc`, `${C.amber}cc`],
+        }],
+      },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        plugins: {
+          legend: { position: "right" },
+          subtitle: {
+            display: true,
+            text: "en nombre de regimes",
+            color: "#999",
+            font: { size: 11, style: "italic" },
+            padding: { bottom: 6 },
+          },
+        },
+      },
+      plugins: [labelsPlugin],
     };
   }, [data]);
 
@@ -99,12 +406,21 @@ export default function DetailSecteur() {
     };
   }, [data]);
 
+  const derniereRecolte = data?.last_recoltes?.[0]?.date;
+
   return (
     <div className="page">
       <div className="page-header-row">
-        <h2>
-          Secteur {data?.secteur?.code ? `${data.secteur.code} - ${data.secteur.nom}` : `#${id}`}
-        </h2>
+        <div>
+          <h2 style={{ margin: 0 }}>
+            Secteur {data?.secteur?.code ? `${data.secteur.code} — ${data.secteur.nom}` : `#${id}`}
+          </h2>
+          {derniereRecolte && (
+            <p style={{ margin: "3px 0 0", fontSize: 13, color: "#888" }}>
+              Derniere recolte : {derniereRecolte}
+            </p>
+          )}
+        </div>
         <div className="row-actions">
           <button className="btn-ghost" onClick={() => navigate(-1)}>Retour</button>
           <button className="btn-ghost" onClick={handleExport} disabled={!data}>Exporter Excel</button>
@@ -126,27 +442,52 @@ export default function DetailSecteur() {
         <LogoLoader />
       ) : (
         <>
-          <section className="stats-grid">
-            <article className="stat-card">
-              <h3>Superficie (ha)</h3>
-              <p>{data?.secteur?.superficie_ha ?? "-"}</p>
-            </article>
-            <article className="stat-card">
-              <h3>Total regimes ({data?.year})</h3>
-              <p>{data?.stats?.total_regimes ?? 0}</p>
-            </article>
-            <article className="stat-card">
-              <h3>Rendement (reg/ha)</h3>
-              <p>{data?.stats?.rendement_ha ?? 0}</p>
-            </article>
-          </section>
+          <p style={GRP_LBL}>Informations</p>
+          <div style={G3}>
+            <KpiCard
+              label="Superficie"
+              value={`${data.secteur.superficie_ha} ha`}
+              sub={data.secteur.rendement_cible_t_ha ? `Cible : ${data.secteur.rendement_cible_t_ha} t/ha` : undefined}
+              color={C.teal}
+            />
+            <KpiCard
+              label="Nb palmiers"
+              value={data.secteur.nb_palmiers ? fmtInt(data.secteur.nb_palmiers) : "—"}
+              color={C.green}
+            />
+            <KpiCard
+              label="Statut"
+              value={data.secteur.statut === "actif" ? "Actif" : "Inactif"}
+              color={data.secteur.statut === "actif" ? C.green : C.red}
+            />
+          </div>
+
+          <p style={GRP_LBL}>Production {data.year}</p>
+          <div style={G3}>
+            <KpiCard label="Total regimes"    value={fmtInt(data.stats.total_regimes)}         color={C.green}  />
+            <KpiCard label="Rendement reg/ha" value={fmtDec(data.stats.rendement_ha)}           color={C.blue}   />
+            <KpiCard label="Recolteurs actifs" value={fmtInt(data.stats.nb_recolteurs_actifs)}  color={C.purple} />
+          </div>
+
+          <p style={GRP_LBL}>Repartition {data.year}</p>
+          <div style={G3}>
+            <KpiCard label="Grands" value={fmtInt(data.stats.regime_breakdown?.grands ?? 0)} color={C.green} />
+            <KpiCard label="Moyens" value={fmtInt(data.stats.regime_breakdown?.moyens ?? 0)} color={C.blue}  />
+            <KpiCard label="Petits" value={fmtInt(data.stats.regime_breakdown?.petits ?? 0)} color={C.amber} />
+          </div>
 
           <section className="charts-grid">
             {monthlyChart && (
               <ChartCard {...monthlyChart} onClick={() => setActiveChart(monthlyChart)} />
             )}
+            {fichesChart && (
+              <ChartCard {...fichesChart} onClick={() => setActiveChart(fichesChart)} />
+            )}
             {yearlyChart && (
               <ChartCard {...yearlyChart} onClick={() => setActiveChart(yearlyChart)} />
+            )}
+            {repartitionChart && (
+              <ChartCard {...repartitionChart} onClick={() => setActiveChart(repartitionChart)} />
             )}
             {topRecolteursChart && (
               <ChartCard {...topRecolteursChart} onClick={() => setActiveChart(topRecolteursChart)} />
@@ -154,32 +495,6 @@ export default function DetailSecteur() {
           </section>
 
           <ChartDialog open={!!activeChart} chart={activeChart} onClose={() => setActiveChart(null)} />
-
-          <section className="tables-grid">
-            <article className="table-card">
-              <h3>Dernieres recoltes ({data?.year})</h3>
-              <DataTable
-                columns={[
-                  { key: "date", label: "Date" },
-                  { key: "total_regimes", label: "Total regimes" },
-                ]}
-                rows={data?.last_recoltes || []}
-                pageSize={8}
-              />
-            </article>
-            <article className="table-card">
-              <h3>Top recolteurs ({data?.year})</h3>
-              <DataTable
-                columns={[
-                  { key: "code", label: "Code" },
-                  { key: "nom", label: "Nom" },
-                  { key: "total", label: "Total regimes" },
-                ]}
-                rows={data?.top_recolteurs || []}
-                pageSize={8}
-              />
-            </article>
-          </section>
         </>
       )}
     </div>

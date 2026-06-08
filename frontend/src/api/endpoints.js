@@ -8,5 +8,8 @@ export const endpoints = {
   materiels: "/materiels/",
   materielsUtilises: "/materiels-utilises/",
   users: "/users/",
+  superviseurs: "/superviseurs/",
   audit: "/audit/",
+  agents: "/agents/",
+  droits: "/droits/",
 };

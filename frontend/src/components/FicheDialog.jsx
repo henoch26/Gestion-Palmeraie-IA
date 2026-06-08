@@ -3,6 +3,13 @@ import useBodyScrollLock from "../utils/useBodyScrollLock.js";
 const fmt = (n) =>
   new Intl.NumberFormat("fr-FR", { maximumFractionDigits: 0 }).format(Number(n || 0));
 
+const fmtDateTime = (iso) => {
+  if (!iso) return null;
+  const d = new Date(iso);
+  return d.toLocaleDateString("fr-FR", { day: "2-digit", month: "long", year: "numeric" })
+    + " à " + d.toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" });
+};
+
 export default function FicheDialog({ open, onClose, fiche }) {
   useBodyScrollLock(!!open);
   if (!open || !fiche) return null;
@@ -47,6 +54,21 @@ export default function FicheDialog({ open, onClose, fiche }) {
 
         <h3>Details de la fiche</h3>
 
+        {/* Bandeau validation */}
+        {fiche.statut === "valide" && (fiche.validated_by_display || fiche.validated_at) && (
+          <div style={{
+            background: "#e8f5e9", border: "1px solid #a5d6a7",
+            borderRadius: 8, padding: "8px 14px", marginBottom: 14,
+            fontSize: 13, color: "#2e7d32", display: "flex", alignItems: "center", gap: 8,
+          }}>
+            <span style={{ fontSize: 16 }}>✓</span>
+            <span>
+              Validée{fiche.validated_by_display ? <> par <strong>{fiche.validated_by_display}</strong></> : ""}
+              {fiche.validated_at ? <> le <strong>{fmtDateTime(fiche.validated_at)}</strong></> : ""}
+            </span>
+          </div>
+        )}
+
         {/* En-tete */}
         <div className="fiche-dialog-grid">
           <div><strong>Date :</strong> {fiche.date}</div>
@@ -54,6 +76,21 @@ export default function FicheDialog({ open, onClose, fiche }) {
           <div><strong>Statut :</strong> {fiche.statut_display || fiche.statut || "-"}</div>
           <div><strong>Total régimes :</strong> {fmt(totalRegimes)}</div>
           <div><strong>Prix récolte :</strong> {fmt(totalPrix)} FCFA</div>
+          {fiche.heure_debut && (
+            <div><strong>Heure début :</strong> {fiche.heure_debut}</div>
+          )}
+          {fiche.heure_fin && (
+            <div><strong>Heure fin :</strong> {fiche.heure_fin}</div>
+          )}
+          {fiche.conditions_meteo && (
+            <div><strong>Météo :</strong> {fiche.conditions_meteo}</div>
+          )}
+          {fiche.nb_palmiers_recoltes != null && (
+            <div><strong>Palmiers récoltés :</strong> {fmt(fiche.nb_palmiers_recoltes)}</div>
+          )}
+          {fiche.surface_recoltee_ha != null && (
+            <div><strong>Surface récoltée :</strong> {fiche.surface_recoltee_ha} ha</div>
+          )}
         </div>
 
         {/* Barème */}
@@ -98,7 +135,10 @@ export default function FicheDialog({ open, onClose, fiche }) {
             <ul className="fiche-dialog-list">
               {superviseurs.map((s) => (
                 <li key={s.id}>
-                  <strong>{s.nom}</strong> — {s.secteur_ou_recolteur}
+                  <strong>{s.nom}</strong>
+                  {s.matricule && <span className="fiche-chip">{s.matricule}</span>}
+                  {s.telephone && <span style={{ color: "#666", fontSize: 13 }}> — {s.telephone}</span>}
+                  {s.secteur_ou_recolteur && <span> — {s.secteur_ou_recolteur}</span>}
                 </li>
               ))}
             </ul>
@@ -152,6 +192,15 @@ export default function FicheDialog({ open, onClose, fiche }) {
                   <div className="fiche-line-details">
                     <span className="fiche-chip">Pesée : {r.pesee_kg} kg</span>
                     <span className="fiche-chip">Non conformes : {r.non_conformes_pct}%</span>
+                    {r.reference_facture && (
+                      <span className="fiche-chip">Facture : {r.reference_facture}</span>
+                    )}
+                    {r.mode_paiement && (
+                      <span className="fiche-chip">Paiement : {r.mode_paiement}</span>
+                    )}
+                    {r.vehicule_transport && (
+                      <span className="fiche-chip">Véhicule : {r.vehicule_transport}</span>
+                    )}
                   </div>
                 </div>
               ))}

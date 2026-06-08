@@ -49,6 +49,15 @@ class FicheRecolte(models.Model):
     # Dépense totale = nourriture + transport + salaires versés aux récolteurs (auto)
     depense_total = models.DecimalField(max_digits=14, decimal_places=2, default=0)
     created_at = models.DateTimeField(auto_now_add=True)
+    # Traçabilité de la validation
+    validated_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="fiches_validees",
+    )
+    validated_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:
         db_table = "fiche_recolte"
@@ -60,6 +69,13 @@ class FicheRecolte(models.Model):
 class SuperviseurAdjoint(models.Model):
     fiche = models.ForeignKey(
         FicheRecolte, on_delete=models.CASCADE, related_name="superviseurs_adjoints"
+    )
+    agent = models.ForeignKey(
+        "agents.AgentTerrain",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="fiches_participees",
     )
     nom = models.CharField(max_length=120)
     secteur_ou_recolteur = models.CharField(max_length=120)

@@ -9,6 +9,7 @@ export default function ChartCard({
   onClick,
   onChartReady,
   headerRight,
+  plugins,
 }) {
 
     // creation des references persistantes
@@ -25,7 +26,8 @@ export default function ChartCard({
         // creation d'un nouveau graphique
 
         chartRef.current = new Chart(canvasRef.current,{
-            type,data,options,
+            type, data, options,
+            plugins: plugins || [],
         });
 
         if (onChartReady) onChartReady(chartRef.current);

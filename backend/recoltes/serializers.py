@@ -29,9 +29,12 @@ class ClientSerializer(serializers.ModelSerializer):
 
 
 class SuperviseurAdjointSerializer(serializers.ModelSerializer):
+    agent_code = serializers.CharField(source="agent.code", read_only=True, default=None)
+    agent_telephone = serializers.CharField(source="agent.telephone", read_only=True, default=None)
+
     class Meta:
         model = SuperviseurAdjoint
-        fields = ["id", "nom", "secteur_ou_recolteur", "matricule", "telephone"]
+        fields = ["id", "agent", "agent_code", "agent_telephone", "nom", "secteur_ou_recolteur", "matricule", "telephone"]
 
 
 class FicheRecolteDetailSerializer(serializers.ModelSerializer):
@@ -123,53 +126,49 @@ class FicheRecolteSerializer(serializers.ModelSerializer):
     recus = FicheRecuVenteSerializer(many=True, required=False)
     created_by_username = serializers.CharField(source="created_by.username", read_only=True)
     statut_display = serializers.CharField(source="get_statut_display", read_only=True)
-
-    # Champs financiers — masqués pour les non-admin
-    CHAMPS_ADMIN = {
-        "bareme_grands", "bareme_moyens", "bareme_petits",
-        "depense_nourriture", "depense_transport", "depense_salaire",
-        "depense_total", "recus",
-    }
+    validated_by_display = serializers.SerializerMethodField()
 
     class Meta:
         model = FicheRecolte
         fields = "__all__"
-        read_only_fields = ["created_by", "created_at", "depense_total"]
+        read_only_fields = ["created_by", "created_at", "depense_total", "validated_by", "validated_at"]
 
-    def to_representation(self, instance):
-        data = super().to_representation(instance)
-        request = self.context.get("request")
-        if request and hasattr(request.user, "profile") and request.user.profile.is_superviseur:
-            for champ in self.CHAMPS_ADMIN:
-                data.pop(champ, None)
-        return data
+    def get_validated_by_display(self, obj):
+        if not obj.validated_by:
+            return None
+        u = obj.validated_by
+        return f"{u.first_name} {u.last_name}".strip() or u.username
 
     def validate(self, attrs):
-        if not (attrs.get("superviseur_general") or "").strip():
-            raise serializers.ValidationError(
-                {"superviseur_general": "Superviseur general requis"}
-            )
+        # Ces validations ne s'appliquent que si les champs sont présents dans la requête
+        # (permet les PATCH partiels, ex: { statut: "valide" } sans re-soumettre toute la fiche)
+        if "superviseur_general" in attrs:
+            if not (attrs.get("superviseur_general") or "").strip():
+                raise serializers.ValidationError(
+                    {"superviseur_general": "Superviseur general requis"}
+                )
 
-        lignes = attrs.get("lignes") or []
-        if not lignes:
-            raise serializers.ValidationError(
-                {"lignes": "Au moins une recolte (quantite > 0) est requise"}
-            )
+        if "lignes" in attrs:
+            lignes = attrs.get("lignes") or []
+            if not lignes:
+                raise serializers.ValidationError(
+                    {"lignes": "Au moins une recolte (quantite > 0) est requise"}
+                )
 
-        has_any_qty = False
-        for ligne in lignes:
-            for det in (ligne.get("details") or []):
-                try:
-                    if int(det.get("quantite") or 0) > 0:
-                        has_any_qty = True
-                        break
-                except Exception:
-                    pass
-            if has_any_qty:
-                break
+            has_any_qty = False
+            for ligne in lignes:
+                for det in (ligne.get("details") or []):
+                    try:
+                        if int(det.get("quantite") or 0) > 0:
+                            has_any_qty = True
+                            break
+                    except Exception:
+                        pass
+                if has_any_qty:
+                    break
 
-        if not has_any_qty:
-            raise serializers.ValidationError({"lignes": "Saisis au moins une quantite > 0"})
+            if not has_any_qty:
+                raise serializers.ValidationError({"lignes": "Saisis au moins une quantite > 0"})
 
         return attrs
 

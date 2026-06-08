@@ -10,8 +10,8 @@ from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 
 from utils.permissions import IsAdmin
-from .models import Notification, UserProfile, AuditLog
-from .serializers import CreateUserSerializer, ProfileSerializer, UpdateUserSerializer, UserListSerializer, AuditLogSerializer
+from .models import Notification, UserProfile, AuditLog, Droit
+from .serializers import CreateUserSerializer, DroitSerializer, ProfileSerializer, UpdateUserSerializer, UserListSerializer, AuditLogSerializer
 
 
 def _user_payload(user):
@@ -30,6 +30,10 @@ def _user_payload(user):
         numero_telephone = user.profile.numero_telephone
     except UserProfile.DoesNotExist:
         numero_telephone = ""
+    try:
+        permissions = list(user.profile.droits.values_list("code", flat=True))
+    except Exception:
+        permissions = []
     return {
         "id": user.id,
         "username": user.username,
@@ -40,6 +44,7 @@ def _user_payload(user):
         "role_display": role_display,
         "must_change_password": must_change_password,
         "numero_telephone": numero_telephone,
+        "permissions": permissions,
     }
 
 
@@ -187,6 +192,14 @@ def users_detail(request, pk):
                 return Response({"detail": "Impossible de désactiver votre propre compte"}, status=400)
             if request.data.get("role") == UserProfile.ROLE_SUPERVISEUR:
                 return Response({"detail": "Impossible de rétrograder votre propre rôle"}, status=400)
+
+        # Mise à jour des permissions (si présentes dans la requête)
+        if "permissions" in request.data:
+            codes = request.data.get("permissions") or []
+            profile, _ = UserProfile.objects.get_or_create(user=user)
+            droits = Droit.objects.filter(code__in=codes)
+            profile.droits.set(droits)
+
         serializer = UpdateUserSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         serializer.update(user, serializer.validated_data)
@@ -238,6 +251,30 @@ def notification_mark_read(request, pk):
 def notifications_mark_all_read(request):
     Notification.objects.filter(user=request.user, lu=False).update(lu=True)
     return Response({"ok": True})
+
+
+# ─── Droits disponibles (admin uniquement) ───────────────────────────────────
+
+@api_view(["GET"])
+@permission_classes([IsAuthenticated, IsAdmin])
+def droits_list(request):
+    droits = Droit.objects.all()
+    return Response(DroitSerializer(droits, many=True).data)
+
+
+# ─── Liste des superviseurs (tous les utilisateurs authentifiés) ─────────────
+
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def superviseurs_list(request):
+    users = User.objects.select_related("profile").filter(
+        profile__role__in=(UserProfile.ROLE_SUPERVISEUR, UserProfile.ROLE_SUPERVISEUR_ADJOINT)
+    ).filter(is_active=True).order_by("last_name", "first_name", "username")
+    data = []
+    for u in users:
+        display = f"{u.first_name} {u.last_name}".strip() or u.username
+        data.append({"id": u.id, "username": u.username, "display_name": display})
+    return Response(data)
 
 
 # ─── Journal d'audit (admin uniquement) ──────────────────────────────────────

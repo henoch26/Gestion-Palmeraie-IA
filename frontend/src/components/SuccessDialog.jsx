@@ -27,12 +27,13 @@ function CheckIcon({ size = 54 }) {
   );
 }
 
-// Petite boite au centre (succes) avec bouton OK
+// Boite succes avec bouton OK et actions optionnelles
 export default function SuccessDialog({
   open,
   title = "Succes",
   message = "Operation reussie",
   onClose,
+  actions = [],
 }) {
   useBodyScrollLock(!!open);
   useEffect(() => {
@@ -56,7 +57,12 @@ export default function SuccessDialog({
         </div>
 
         <div className="dialog-actions success-dialog-actions">
-          <button className="btn-primary" onClick={onClose}>
+          {actions.map((a, i) => (
+            <button key={i} className={a.className || "btn-primary"} onClick={a.onClick}>
+              {a.label}
+            </button>
+          ))}
+          <button className={actions.length > 0 ? "btn-ghost" : "btn-primary"} onClick={onClose}>
             OK
           </button>
         </div>

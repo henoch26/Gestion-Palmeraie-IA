@@ -26,5 +26,6 @@ urlpatterns = [
     path("api/", include("dashboard.urls")),
     path("api/", include("travaux.urls")),
     path("api/", include("materiels.urls")),
+    path("api/", include("agents.urls")),
     path("api-auth/", include("rest_framework.urls")),
 ]

@@ -30,8 +30,8 @@ export const ficheRecolteInitial = {
   date: "",
   superviseurGeneral: "",
   superviseursAdjoints: [
-    { id: "SA-001", nom: "K. Kouassi", secteur: "GP_1" },
-    { id: "SA-002", nom: "M. Yao", secteur: "GP_2" },
+    { id: "SA-001", nom: "K. Kouassi", secteur: "GP_1", agentId: null },
+    { id: "SA-002", nom: "M. Yao", secteur: "GP_2", agentId: null },
   ],
   // Bareme (editable)
   bareme: {

@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 
 const NATURE_TRAVAUX_OPTIONS = [
   { value: "desherbage", label: "Désherbage" },
@@ -24,6 +25,7 @@ import { createFicheTravaux, listFichesTravaux, patchFicheTravaux } from "../../
 import { useAuth } from "../../context/AuthContext.jsx";
 import { getToken } from "../../services/authService.js";
 import { sanitizeDecimal, sanitizeInt } from "../../utils/number.js";
+import { saveTravauxOffline } from "../../utils/offline.js";
 
 const API_BASE = import.meta.env.VITE_API_URL || "http://127.0.0.1:8000/api";
 
@@ -32,9 +34,12 @@ const uid = (prefix = "ID") =>
 
 export default function HistoriqueTravaux() {
   const { pushToast } = useToast();
-  const { isAdmin, isSuperviseur } = useAuth();
+  const { isAdmin, isSuperviseur, hasPermission } = useAuth();
+  const canSaisir = isAdmin || hasPermission("gerer_travaux");
 
-  const [tab, setTab] = useState("entete"); // entete | consommables | taches | historique
+  const [searchParams, setSearchParams] = useSearchParams();
+  const tab = searchParams.get("tab") || "entete"; // entete | consommables | taches | historique
+  const setTab = (key) => setSearchParams({ tab: key }, { replace: true });
 
   const [fiche, setFiche] = useState(ficheTravauxInitial);
   const [saving, setSaving] = useState(false);
@@ -257,8 +262,15 @@ export default function HistoriqueTravaux() {
       setSaving(true);
       setFieldErrors({});
       const payload = buildPayload();
+
+      if (!navigator.onLine) {
+        await saveTravauxOffline(payload);
+        setSuccess({ open: true, message: "Fiche sauvegardée hors ligne — sera synchronisée à la reconnexion." });
+        return;
+      }
+
       await createFicheTravaux(payload);
-      setSuccess({ open: true, message: "Fiche travaux enregistree avec succes" });
+      setSuccess({ open: true, message: "Fiche travaux enregistrée avec succès" });
       loadHistory();
     } catch (err) {
       pushToast({ type: "error", title: "Travaux", message: err.message });
@@ -390,34 +402,13 @@ export default function HistoriqueTravaux() {
         </div>
       </header>
 
-      <div className="tabs" style={{ marginTop: 12 }}>
-        <button
-          className={`tab-btn ${tab === "entete" ? "active" : ""}`}
-          onClick={() => setTab("entete")}
-        >
-          En-tete
-        </button>
-        <button
-          className={`tab-btn ${tab === "consommables" ? "active" : ""}`}
-          onClick={() => setTab("consommables")}
-        >
-          Consommables
-        </button>
-        <button
-          className={`tab-btn ${tab === "taches" ? "active" : ""}`}
-          onClick={() => setTab("taches")}
-        >
-          Taches
-        </button>
-        <button
-          className={`tab-btn ${tab === "historique" ? "active" : ""}`}
-          onClick={() => setTab("historique")}
-        >
-          Historique
-        </button>
-      </div>
+      {(tab === "entete" || tab === "consommables" || tab === "taches") && !canSaisir && (
+        <div style={{ padding: "40px 0", textAlign: "center", color: "#888" }}>
+          Vous n'avez pas l'autorisation de saisir des travaux. Contactez l'administrateur.
+        </div>
+      )}
 
-      {tab === "entete" && (
+      {tab === "entete" && canSaisir && (
         <>
           <section
             className={`fiche-section ${
@@ -605,7 +596,7 @@ export default function HistoriqueTravaux() {
         </>
       )}
 
-      {tab === "consommables" && (
+      {tab === "consommables" && canSaisir && (
         <section className="fiche-section">
           <div className="section-row">
             <h3>Consommables necessaires</h3>
@@ -682,7 +673,7 @@ export default function HistoriqueTravaux() {
         </section>
       )}
 
-      {tab === "taches" && (
+      {tab === "taches" && canSaisir && (
         <section className="fiche-section">
           <div className="section-row">
             <h3>Repartition des taches executees par chaque personne</h3>

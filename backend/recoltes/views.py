@@ -49,23 +49,55 @@ def _style_header(ws, headers, fill_color="1F4E79"):
     ws.auto_filter.ref = ws.dimensions
 
 
-def _notify_statut_recolte(instance, old_statut, new_statut):
-    if not new_statut or new_statut == old_statut or not instance.created_by:
-        return
-    date_str = str(instance.date) if instance.date else f"#{instance.id}"
-    if new_statut == "valide":
-        create_notification(instance.created_by,
-                            f"Votre fiche de recolte du {date_str} a ete validee.", "success", "/recoltes")
-    elif new_statut == "brouillon" and old_statut == "soumis":
-        create_notification(instance.created_by,
-                            f"Votre fiche de recolte du {date_str} a ete rejetee.", "warning", "/recoltes")
-
-
 def _is_admin(user):
     try:
         return user.profile.is_admin
     except AttributeError:
         return False
+
+
+def _is_superviseur(user):
+    """Retourne True uniquement pour le rôle 'superviseur' (pas adjoint)."""
+    try:
+        return user.profile.role == "superviseur"
+    except AttributeError:
+        return False
+
+
+def _notify_statut_recolte(instance, old_statut, new_statut, actor=None):
+    if not new_statut or new_statut == old_statut:
+        return
+    date_str = str(instance.date) if instance.date else f"#{instance.id}"
+
+    if new_statut == "valide":
+        actor_is_superviseur = actor and _is_superviseur(actor)
+        if actor_is_superviseur:
+            # Le superviseur valide → notifier tous les administrateurs
+            from django.contrib.auth.models import User as DjangoUser
+            actor_name = f"{actor.first_name} {actor.last_name}".strip() or actor.username
+            admins = DjangoUser.objects.filter(profile__role="admin", is_active=True)
+            for admin in admins:
+                create_notification(
+                    admin,
+                    f"Nouvelle fiche du {date_str} validee par {actor_name}.",
+                    "info",
+                    "/recoltes",
+                )
+        elif instance.created_by:
+            # L'admin valide → notifier le créateur
+            create_notification(
+                instance.created_by,
+                f"Votre fiche de recolte du {date_str} a ete validee.",
+                "success",
+                "/recoltes",
+            )
+    elif new_statut == "brouillon" and old_statut == "soumis" and instance.created_by:
+        create_notification(
+            instance.created_by,
+            f"Votre fiche de recolte du {date_str} a ete rejetee.",
+            "warning",
+            "/recoltes",
+        )
 
 
 class FicheRecolteViewSet(viewsets.ModelViewSet):
@@ -75,12 +107,21 @@ class FicheRecolteViewSet(viewsets.ModelViewSet):
         qs = FicheRecolte.objects.prefetch_related(
             "superviseurs_adjoints", "lignes__details", "recus"
         ).order_by("-id")
-        if not _is_admin(self.request.user):
+        # Admin et superviseur voient toutes les fiches ; les autres uniquement les leurs
+        if not _is_admin(self.request.user) and not _is_superviseur(self.request.user):
             qs = qs.filter(created_by=self.request.user)
         return qs
 
     def perform_create(self, serializer):
         serializer.save(created_by=self.request.user)
+
+    def create(self, request, *args, **kwargs):
+        if _is_admin(request.user):
+            return Response(
+                {"detail": "Les administrateurs ne peuvent pas créer de fiches de récolte. Cette action est réservée aux superviseurs."},
+                status=403,
+            )
+        return super().create(request, *args, **kwargs)
 
     def get_permissions(self):
         if self.action in ("export",):
@@ -93,13 +134,22 @@ class FicheRecolteViewSet(viewsets.ModelViewSet):
         if not new_statut:
             return None
         is_admin = _is_admin(request.user)
-        if new_statut == "valide" and not is_admin:
-            return Response({"detail": "Seul l'administrateur peut valider une fiche."}, status=403)
+        is_sup   = _is_superviseur(request.user)
+        can_validate = is_admin or is_sup
+
+        if new_statut == "valide" and not can_validate:
+            return Response(
+                {"detail": "Seul l'administrateur ou le superviseur peut valider une fiche."},
+                status=403,
+            )
+        # Seul l'admin peut modifier une fiche déjà validée
         if instance and instance.statut == "valide" and not is_admin:
-            return Response({"detail": "Seul l'administrateur peut modifier une fiche validée."}, status=403)
+            return Response(
+                {"detail": "Seul l'administrateur peut modifier une fiche validée."},
+                status=403,
+            )
         if instance and instance.statut == "valide" and is_admin:
-            # Marque l'instance pour l'audit signal
-            instance._audit_user = request.user
+            instance._audit_user  = request.user
             instance._audit_motif = request.data.get("motif", "")
         return None
 
@@ -109,8 +159,14 @@ class FicheRecolteViewSet(viewsets.ModelViewSet):
         if err:
             return err
         old_statut = instance.statut
+        new_statut = request.data.get("statut")
         response = super().partial_update(request, *args, **kwargs)
-        _notify_statut_recolte(instance, old_statut, request.data.get("statut"))
+        if new_statut == "valide" and old_statut != "valide":
+            instance.refresh_from_db()
+            instance.validated_by = request.user
+            instance.validated_at = timezone.now()
+            instance.save(update_fields=["validated_by", "validated_at"])
+        _notify_statut_recolte(instance, old_statut, new_statut, actor=request.user)
         return response
 
     def update(self, request, *args, **kwargs):
@@ -119,8 +175,14 @@ class FicheRecolteViewSet(viewsets.ModelViewSet):
         if err:
             return err
         old_statut = instance.statut
+        new_statut = request.data.get("statut")
         response = super().update(request, *args, **kwargs)
-        _notify_statut_recolte(instance, old_statut, request.data.get("statut"))
+        if new_statut == "valide" and old_statut != "valide":
+            instance.refresh_from_db()
+            instance.validated_by = request.user
+            instance.validated_at = timezone.now()
+            instance.save(update_fields=["validated_by", "validated_at"])
+        _notify_statut_recolte(instance, old_statut, new_statut, actor=request.user)
         return response
 
     @action(detail=False, methods=["get"], url_path="analytics")
@@ -174,6 +236,53 @@ class FicheRecolteViewSet(viewsets.ModelViewSet):
             "yearly": {"labels": yearly_labels, "data": [int(yearly_map.get(y, 0)) for y in yearly_labels]},
             "recolteurs": list(personnel),
         })
+
+    @action(detail=False, methods=["get"], url_path="by_date")
+    def by_date(self, request):
+        date_str = request.query_params.get("date")
+        if not date_str:
+            return Response({"detail": "Paramètre 'date' requis."}, status=400)
+
+        fiches = FicheRecolte.objects.filter(date=date_str).prefetch_related(
+            "lignes__recolteur", "lignes__details__secteur"
+        ).order_by("id")
+
+        result = []
+        for fiche in fiches:
+            lignes_data = []
+            for ligne in fiche.lignes.all():
+                det_list = [
+                    {
+                        "secteur_code": d.secteur_code or (d.secteur.code if d.secteur else ""),
+                        "quantite": int(d.quantite),
+                    }
+                    for d in ligne.details.all()
+                ]
+                lignes_data.append({
+                    "recolteur_nom": (ligne.recolteur.nom if ligne.recolteur else None) or ligne.recolteur_nom or "—",
+                    "recolteur_telephone": ligne.recolteur.numero_telephone if ligne.recolteur else "",
+                    "regime_type": ligne.regime_type,
+                    "details": det_list,
+                    "total": sum(d["quantite"] for d in det_list),
+                })
+
+            grands = sum(l["total"] for l in lignes_data if l["regime_type"] == "grands")
+            moyens = sum(l["total"] for l in lignes_data if l["regime_type"] == "moyens")
+            petits = sum(l["total"] for l in lignes_data if l["regime_type"] == "petits")
+
+            result.append({
+                "id": fiche.id,
+                "date": str(fiche.date),
+                "statut": fiche.statut,
+                "superviseur_general": fiche.superviseur_general or "—",
+                "total_regimes": grands + moyens + petits,
+                "grands": grands,
+                "moyens": moyens,
+                "petits": petits,
+                "lignes": lignes_data,
+            })
+
+        return Response(result)
 
     @action(detail=False, methods=["get"], url_path="export")
     def export(self, request):

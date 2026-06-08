@@ -4,6 +4,7 @@ import "./index.css";
 import App from "./App.jsx";
 import { ToastProvider } from "./context/ToastContext.jsx";
 import { AuthProvider } from "./context/AuthContext.jsx";
+import { RecoltesProvider } from "./context/RecoltesContext.jsx";
 import OfflineBanner from "./components/OfflineBanner.jsx";
 
 // Enregistrement du Service Worker (mode prod uniquement pour éviter les conflits HMR)
@@ -18,10 +19,12 @@ if ("serviceWorker" in navigator) {
 createRoot(document.getElementById("root")).render(
   <StrictMode>
     <AuthProvider>
-      <ToastProvider>
-        <OfflineBanner />
-        <App />
-      </ToastProvider>
+      <RecoltesProvider>
+        <ToastProvider>
+          <OfflineBanner />
+          <App />
+        </ToastProvider>
+      </RecoltesProvider>
     </AuthProvider>
   </StrictMode>
 );

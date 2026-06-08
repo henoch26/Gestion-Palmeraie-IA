@@ -65,6 +65,24 @@ def summary_view(request):
     total_production = int(
         details_qs.filter(ligne__fiche__date__year=selected_year).aggregate(total=Sum("quantite"))["total"] or 0
     )
+    # Production du jour et du mois courant
+    prod_today = int(
+        details_qs.filter(ligne__fiche__date=today).aggregate(t=Sum("quantite"))["t"] or 0
+    )
+    prod_month = int(
+        details_qs.filter(
+            ligne__fiche__date__year=today.year, ligne__fiche__date__month=today.month
+        ).aggregate(t=Sum("quantite"))["t"] or 0
+    )
+    # Évolution % vs N-1
+    total_production_prev = int(
+        details_qs.filter(ligne__fiche__date__year=prev_year).aggregate(t=Sum("quantite"))["t"] or 0
+    )
+    if total_production_prev:
+        evolution_pct = round((total_production - total_production_prev) / total_production_prev * 100, 1)
+    else:
+        evolution_pct = None
+
     secteurs_involved = (
         details_qs.filter(ligne__fiche__date__year=selected_year)
         .values("secteur").exclude(secteur__isnull=True).distinct().count()
@@ -102,6 +120,22 @@ def summary_view(request):
     dep_salaires   = float(qs_year.aggregate(t=Sum("depense_salaire"))["t"] or 0)
     depenses_total_recolte = dep_nourriture + dep_transport
     depenses_totales = dep_nourriture + dep_transport + dep_salaires
+
+    # KPIs financiers supplémentaires
+    nb_ventes = FicheRecuVente.objects.filter(
+        fiche__in=fiches_recolte_qs, date__isnull=False, date__year=selected_year
+    ).count()
+    ca_mois = float(
+        FicheRecuVente.objects.filter(
+            fiche__in=fiches_recolte_qs, date__isnull=False,
+            date__year=today.year, date__month=today.month,
+        ).aggregate(t=Sum("montant"))["t"] or 0
+    )
+    prix_moyen_kg = round(float(montant_total_ventes) / total_kg, 0) if total_kg else 0
+    cout_moyen_kg = round(depenses_totales / total_kg, 0) if total_kg else 0
+    benefice = float(montant_total_ventes) - depenses_totales
+    marge_pct = round(benefice / float(montant_total_ventes) * 100, 1) if float(montant_total_ventes) else 0
+    rendement_kg_ha = round(total_kg / superficie_totale, 2) if superficie_totale else 0
 
     # Coûts travaux
     cost_expr = ExpressionWrapper(
@@ -333,6 +367,83 @@ def summary_view(request):
 
     dep_par_secteur = depenses_par_secteur(selected_year)
 
+    # ── Répartition régimes par secteur (grands/moyens/petits par secteur) ──────
+    def production_par_regime_et_secteur(target_year):
+        result = {}
+        for rtype in ("grands", "moyens", "petits"):
+            qs = (
+                details_qs
+                .filter(ligne__fiche__date__year=target_year, ligne__regime_type=rtype)
+                .values("secteur__code")
+                .annotate(total=Sum("quantite"))
+            )
+            for r in qs:
+                code = r["secteur__code"]
+                if code:
+                    if code not in result:
+                        result[code] = {"grands": 0, "moyens": 0, "petits": 0}
+                    result[code][rtype] = int(r["total"] or 0)
+        return result
+
+    regime_secteur = production_par_regime_et_secteur(selected_year)
+
+    # ── Tableau détaillé par secteur (pour camembert + classement) ────────────
+    secteurs_detail = []
+    for idx, s in enumerate(secteurs_ordered):
+        prod = prod_values[idx] if idx < len(prod_values) else 0
+        sup = float(s["superficie_ha"] or 0)
+        rend_reg = rendement_values[idx] if idx < len(rendement_values) else 0
+        secteurs_detail.append({
+            "id": s["id"],
+            "code": s["code"],
+            "nom": s["nom"],
+            "statut": s["statut"],
+            "superficie_ha": sup,
+            "production_regimes": prod,
+            "rendement_reg_ha": rend_reg,
+            "part_pct": round(float(prod) / float(total_production) * 100, 1) if total_production else 0,
+        })
+    # Tri par production décroissante pour le classement
+    secteurs_detail_sorted = sorted(secteurs_detail, key=lambda x: x["production_regimes"], reverse=True)
+
+    # ── Tableau détaillé par récolteur (top 20) ───────────────────────────────
+    from recoltes.models import FicheRecolteLigne as _Ligne
+    prod_by_rec = (
+        details_qs.filter(ligne__fiche__date__year=selected_year)
+        .exclude(ligne__recolteur__isnull=True)
+        .values("ligne__recolteur", "ligne__recolteur__nom", "ligne__recolteur__numero_telephone", "ligne__recolteur_nom")
+        .annotate(total_regimes=Sum("quantite"))
+        .order_by("-total_regimes")[:20]
+    )
+    salaire_qs = (
+        _Ligne.objects.filter(fiche__date__year=selected_year, recolteur__isnull=False)
+        .values("recolteur")
+        .annotate(total_salaire=Sum("salaire_calcule"))
+    )
+    sal_map = {r["recolteur"]: float(r["total_salaire"] or 0) for r in salaire_qs}
+    recolteurs_detail = []
+    total_rec = Personnel.objects.count()
+    for r in prod_by_rec:
+        rid = r["ligne__recolteur"]
+        prod_r = int(r["total_regimes"] or 0)
+        recolteurs_detail.append({
+            "id": rid,
+            "numero_telephone": r["ligne__recolteur__numero_telephone"] or "",
+            "nom": r["ligne__recolteur__nom"] or r["ligne__recolteur_nom"] or "N/A",
+            "total_regimes": prod_r,
+            "salaire_calcule": sal_map.get(rid, 0.0),
+        })
+
+
+    # ── Répartition régimes avec % ────────────────────────────────────────────
+    reg = repartition_par_regime(selected_year)
+    reg_total = sum(reg.values())
+    reg_pct = {
+        k: {"count": v, "pct": round(v / reg_total * 100, 1) if reg_total else 0}
+        for k, v in reg.items()
+    }
+
+
     # Coûts travaux par nature
     def cout_travaux_par_nature_for_qs(trav_qs, year_filter=None, month_pairs=None):
         cons = ConsommableTravaux.objects.filter(fiche__in=trav_qs)
@@ -431,22 +542,46 @@ def summary_view(request):
     return Response({
         "year": selected_year,
         "stats": {
+            # Production
             "total_production": total_production,
+            "prod_today": prod_today,
+            "prod_month": prod_month,
+            "total_production_prev": total_production_prev,
+            "evolution_pct": evolution_pct,
+            "total_kg": round(total_kg, 2),
+            "poids_moyen_regime": poids_moyen_regime,
+            "rendement_moyen": rendement_moyen,
+            "rendement_kg_ha": rendement_kg_ha,
+            "repartition_par_regime": reg,
+            "repartition_par_regime_pct": reg_pct,
+            # Secteurs
             "secteurs_count": secteurs_count_total,
             "secteurs_actifs": secteurs_actifs,
             "secteurs_involved": secteurs_involved,
+            # Récolteurs
             "recolteurs_actifs": recolteurs_actifs,
-            "rendement_moyen": rendement_moyen,
-            "total_kg": round(total_kg, 2),
-            "poids_moyen_regime": poids_moyen_regime,
+            "total_recolteurs": total_rec,
+            # Financier
             "montant_total_ventes": float(montant_total_ventes),
+            "nb_ventes": nb_ventes,
+            "ca_mois": ca_mois,
+            "prix_moyen_kg": prix_moyen_kg,
             "depenses_total_recolte": depenses_total_recolte,
+            "dep_nourriture": dep_nourriture,
+            "dep_transport": dep_transport,
             "depenses_salaires_recolteurs": dep_salaires,
             "depenses_totales": depenses_totales,
+            "benefice": benefice,
+            "marge_pct": marge_pct,
+            "cout_moyen_kg": cout_moyen_kg,
             "cout_total_travaux": cout_total_travaux,
+            # Fiches
             "fiches_recolte_count": fiches_recolte_count,
             "fiches_travaux_count": fiches_travaux_count,
-            "repartition_par_regime": repartition_par_regime(selected_year),
+        },
+        "tables": {
+            "secteurs_detail": secteurs_detail_sorted,
+            "recolteurs_detail": recolteurs_detail,
         },
         "charts": {
             "production_mensuelle": {"labels": last6_labels, "data": prod_last6},
@@ -495,6 +630,12 @@ def summary_view(request):
             "cout_travaux_annuel_compare": {
                 "year": selected_year, "labels": month_labels,
                 "current": cout_travaux_annuel, "previous": cout_travaux_prev,
+            },
+            "production_par_regime_secteur": {
+                "labels": prod_labels,
+                "grands": [regime_secteur.get(c, {}).get("grands", 0) for c in prod_labels],
+                "moyens": [regime_secteur.get(c, {}).get("moyens", 0) for c in prod_labels],
+                "petits": [regime_secteur.get(c, {}).get("petits", 0) for c in prod_labels],
             },
             "production_par_date": production_par_date_chart,
             "production_multi_years": production_multi_years,

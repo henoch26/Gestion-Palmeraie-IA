@@ -31,6 +31,7 @@ export function AuthProvider({ children }) {
 
   const value = useMemo(() => {
     const role = auth.user?.role ?? null;
+    const permissions = auth.user?.permissions ?? [];
     return {
       user: auth.user,
       token: auth.token,
@@ -42,6 +43,9 @@ export function AuthProvider({ children }) {
       // Vrai pour superviseur ET superviseur_adjoint (tous deux non-admin)
       isNonAdmin: role === "superviseur" || role === "superviseur_adjoint",
       mustChangePassword: auth.user?.must_change_password ?? false,
+      permissions,
+      // L'admin a tous les droits implicitement
+      hasPermission: (code) => role === "admin" || permissions.includes(code),
       login,
       logout,
       refreshUser,

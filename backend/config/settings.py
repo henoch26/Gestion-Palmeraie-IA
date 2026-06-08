@@ -49,6 +49,7 @@ INSTALLED_APPS = [
     'recolteurs',
     'travaux',
     'materiels',
+    'agents',
 ]
 
 MIDDLEWARE = [

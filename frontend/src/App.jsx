@@ -11,6 +11,7 @@ import HistoriqueRecoltes from "./pages/recoltes/HistoriqueRecoltes.jsx";
 import HistoriqueTravaux from "./pages/travaux/HistoriqueTravaux.jsx";
 import ListeMateriels from "./pages/materiels/ListeMateriels.jsx";
 import GestionUtilisateurs from "./pages/admin/GestionUtilisateurs.jsx";
+import ListeAgents from "./pages/agents/ListeAgents.jsx";
 import LoginPage from "./pages/auth/LoginPage.jsx";
 import ChangePasswordPage from "./pages/auth/ChangePasswordPage.jsx";
 import MonProfilPage from "./pages/auth/MonProfilPage.jsx";
@@ -93,14 +94,17 @@ export default function App(){
               <Route path="/profil" element={<MonProfilPage />}/>
               <Route path="/recoltes" element={<HistoriqueRecoltes />}/>
               <Route path="/travaux" element={<HistoriqueTravaux />}/>
+              <Route path="/agents" element={<ListeAgents />}/>
+
+              {/* Ressources — accessibles a l'admin ou aux superviseurs avec permission */}
+              <Route path="/secteurs" element={<ListeSecteurs />}/>
+              <Route path="/secteurs/:id" element={<DetailSecteur />}/>
+              <Route path="/recolteurs" element={<ListeRecolteurs />}/>
+              <Route path="/recolteurs/:id" element={<DetailRecolteur />}/>
+              <Route path="/materiels" element={<ListeMateriels />}/>
 
               {/* Routes admin uniquement */}
               <Route element={<AdminRoute />}>
-                <Route path="/secteurs" element={<ListeSecteurs />}/>
-                <Route path="/secteurs/:id" element={<DetailSecteur />}/>
-                <Route path="/recolteurs" element={<ListeRecolteurs />}/>
-                <Route path="/recolteurs/:id" element={<DetailRecolteur />}/>
-                <Route path="/materiels" element={<ListeMateriels />}/>
                 <Route path="/utilisateurs" element={<GestionUtilisateurs />}/>
               </Route>
             </Route>

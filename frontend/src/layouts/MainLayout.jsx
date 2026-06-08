@@ -2,7 +2,7 @@ import { Outlet, useLocation } from "react-router-dom";
 import { useEffect, useRef, useState } from "react";
 import Sidebar from "../components/Sidebar.jsx";
 
-// Layout principal: topbar + contenu
+// Layout principal: sidebar + contenu
 export default function MainLayout() {
   const { pathname } = useLocation();
   const [isNavigating, setIsNavigating] = useState(false);

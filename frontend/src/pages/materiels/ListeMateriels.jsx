@@ -5,6 +5,7 @@ import ConfirmDialog from "../../components/ConfirmDialog.jsx";
 import MaterielDialog from "../../components/MaterielDialog.jsx";
 import SuccessDialog from "../../components/SuccessDialog.jsx";
 import { useToast } from "../../context/ToastContext.jsx";
+import { useAuth } from "../../context/AuthContext.jsx";
 import {
   createMateriel,
   deleteMateriel,
@@ -14,6 +15,8 @@ import {
 
 export default function ListeMateriels() {
   const { pushToast } = useToast();
+  const { hasPermission } = useAuth();
+  const canWrite = hasPermission("gerer_materiels");
 
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -29,18 +32,16 @@ export default function ListeMateriels() {
     { key: "quantite", label: "Quantite" },
     { key: "etat_physique", label: "Etat physique" },
     { key: "statut_utilisation", label: "Statut d'utilisation" },
-    {
+    ...(canWrite ? [{
       key: "actions",
       label: "Actions",
       render: (row) => (
         <div className="row-actions">
-          <button onClick={() => { setEditing(row); setOpenForm(true); }}>
-            Modifier
-          </button>
+          <button onClick={() => { setEditing(row); setOpenForm(true); }}>Modifier</button>
           <button onClick={() => setToDelete(row)}>Supprimer</button>
         </div>
       ),
-    },
+    }] : []),
   ];
 
   const load = async () => {
@@ -95,7 +96,7 @@ export default function ListeMateriels() {
     <div className="page">
       <div className="page-header-row">
         <h2>Liste du materiel et des equipements</h2>
-        <button className="btn-primary" onClick={handleAdd}>Ajouter</button>
+        {canWrite && <button className="btn-primary" onClick={handleAdd}>Ajouter</button>}
       </div>
 
       {loading ? <LogoLoader /> : <DataTable columns={columns} rows={rows} pageSize={8} />}

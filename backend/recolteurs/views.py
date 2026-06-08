@@ -1,4 +1,5 @@
 import io
+from decimal import Decimal
 
 from django.http import HttpResponse
 from django.db.models import Sum, Count, Max, Q
@@ -75,7 +76,7 @@ class PersonnelViewSet(viewsets.ModelViewSet):
                 last_recolte=Max("lignes_recolte__fiche__date",
                                  filter=Q(lignes_recolte__fiche__date__year=year)),
             )
-            .values("id", "code", "numero_telephone", "nom", "lieu_residence",
+            .values("id", "numero_telephone", "nom", "lieu_residence",
                     "grands", "moyens", "petits", "total_regimes", "fiches_count", "last_recolte")
             .order_by("-total_regimes", "nom")
         )
@@ -129,38 +130,84 @@ class PersonnelViewSet(viewsets.ModelViewSet):
             .first() or {}
         )
 
+        # Salaire total de l'année
+        salaire_total = float(
+            FicheRecolteLigne.objects.filter(recolteur=personne, fiche__date__year=year)
+            .aggregate(t=Coalesce(Sum("salaire_calcule"), Decimal("0")))["t"] or 0
+        )
+
+        # Rang parmi tous les recolteurs sur l'annee
+        all_totals = (
+            FicheRecolteDetail.objects.filter(ligne__fiche__date__year=year)
+            .exclude(ligne__recolteur__isnull=True)
+            .values("ligne__recolteur")
+            .annotate(total=Sum("quantite"))
+            .order_by("-total")
+        )
+        rang = next((i + 1 for i, r in enumerate(all_totals) if r["ligne__recolteur"] == personne.id), None)
+        nb_recolteurs_actifs = all_totals.count()
+
+        # Secteurs travailles cette annee
+        secteurs_qs = (
+            FicheRecolteDetail.objects.filter(
+                ligne__recolteur=personne, ligne__fiche__date__year=year
+            )
+            .exclude(secteur__isnull=True)
+            .values("secteur__code", "secteur__nom")
+            .annotate(total=Sum("quantite"))
+            .order_by("-total")
+        )
+        secteurs = [
+            {"code": r["secteur__code"], "nom": r["secteur__nom"], "total_regimes": int(r["total"] or 0)}
+            for r in secteurs_qs
+        ]
+
         fiches = (
             FicheRecolte.objects.filter(lignes__recolteur=personne, date__year=year)
             .prefetch_related(
                 Prefetch("lignes",
                          queryset=FicheRecolteLigne.objects.filter(recolteur=personne).prefetch_related("details"))
             )
-            .order_by("-date").distinct()[:15]
+            .order_by("-date").distinct()[:20]
         )
         last_rows = []
         for f in fiches:
             totals = {"grands": 0, "moyens": 0, "petits": 0}
             prix_total = 0
+            salaire_fiche = float(
+                FicheRecolteLigne.objects.filter(recolteur=personne, fiche=f)
+                .aggregate(t=Coalesce(Sum("salaire_calcule"), Decimal("0")))["t"] or 0
+            )
             rates = {k: int(getattr(f, f"bareme_{k}", 0) or 0) for k in totals}
             for line in f.lignes.all():
                 qty = sum(int(d.quantite or 0) for d in line.details.all())
                 totals[line.regime_type] = totals.get(line.regime_type, 0) + qty
                 prix_total += qty * rates.get(line.regime_type, 0)
             total_reg = sum(totals.values())
-            last_rows.append({"fiche_id": f.id, "date": f.date,
-                               "grands": totals["grands"], "moyens": totals["moyens"],
-                               "petits": totals["petits"], "total_regimes": total_reg, "prix_fcfa": prix_total})
+            last_rows.append({
+                "fiche_id": f.id, "date": str(f.date), "statut": f.statut,
+                "grands": totals["grands"], "moyens": totals["moyens"],
+                "petits": totals["petits"], "total_regimes": total_reg,
+                "prix_fcfa": prix_total, "salaire_fcfa": salaire_fiche,
+            })
 
         return Response({
             "recolteur": {
-                "id": personne.id, "code": personne.code,
+                "id": personne.id,
+                "nom": personne.nom,
+                "lieu_residence": personne.lieu_residence,
                 "numero_telephone": personne.numero_telephone,
-                "nom": personne.nom, "lieu_residence": personne.lieu_residence,
+                "whatsapp_actif": personne.whatsapp_actif,
+                "est_wave": personne.est_wave,
+                "date_naissance": str(personne.date_naissance) if personne.date_naissance else None,
             },
             "year": year,
             "monthly": {"current": monthly_totals(year), "previous": monthly_totals(prev_year)},
             "yearly": {"labels": yearly_labels, "data": [yearly_map.get(y, 0) for y in yearly_labels]},
-            "stats": base,
+            "stats": {**base, "salaire_total": salaire_total},
+            "rang": rang,
+            "nb_recolteurs_actifs": nb_recolteurs_actifs,
+            "secteurs": secteurs,
             "last_fiches": last_rows,
         })
 
@@ -171,9 +218,8 @@ class PersonnelViewSet(viewsets.ModelViewSet):
         year = int(request.query_params.get("year", today.year))
 
         wb, ws, _ = _xlsx_response(f"personnel_export_{year}.xlsx")
-        headers = ["Code", "Nom", "Lieu résidence", "Tél.", "Wave", "Mobile Money",
-                   "Opérateur MM", "Contrat", "Grands", "Moyens", "Petits",
-                   "Total régimes", "Nb fiches", "Dernière récolte"]
+        headers = ["Téléphone", "Nom", "Lieu résidence", "Wave",
+                   "Grands", "Moyens", "Petits", "Total régimes", "Nb fiches", "Dernière récolte"]
         _style_header(ws, headers)
 
         qs = (
@@ -200,12 +246,8 @@ class PersonnelViewSet(viewsets.ModelViewSet):
             tot = int(p.total_regimes or 0)
             totals[0] += g; totals[1] += m; totals[2] += pe; totals[3] += tot
             ws.append([
-                p.code or "", p.nom, p.lieu_residence,
-                p.numero_telephone or "",
+                p.numero_telephone or "", p.nom, p.lieu_residence,
                 "Oui" if p.est_wave else "Non",
-                "Oui" if p.est_mobile_money else "Non",
-                p.get_operateur_mm_display() if p.est_mobile_money else "",
-                p.get_contrat_display() if p.contrat else "",
                 g, m, pe, tot,
                 int(p.fiches_count or 0),
                 str(p.last_recolte) if p.last_recolte else "",
@@ -214,7 +256,7 @@ class PersonnelViewSet(viewsets.ModelViewSet):
         # Ligne totaux
         total_row = ws.max_row + 1
         ws.cell(row=total_row, column=1, value="TOTAL").font = Font(bold=True)
-        for i, val in enumerate(totals, start=9):
+        for i, val in enumerate(totals, start=5):
             cell = ws.cell(row=total_row, column=i, value=val)
             cell.font = Font(bold=True)
 

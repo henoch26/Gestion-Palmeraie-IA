@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import {
   ficheRecolteInitial,
   regimeTypes,
@@ -6,9 +7,13 @@ import {
 } from "../../data/ficheRecolteData.js";
 import { useToast } from "../../context/ToastContext.jsx";
 import { listSecteurs } from "../../services/secteurService.js";
-import { createFiche, getRecoltesAnalytics, listFiches, patchFiche } from "../../services/recolteService.js";
+import { createFiche, getRecoltesAnalytics, listFiches, patchFiche, updateFiche } from "../../services/recolteService.js";
+import { useRecoltes } from "../../context/RecoltesContext.jsx";
 import { useAuth } from "../../context/AuthContext.jsx";
 import { listRecolteurs } from "../../services/recolteurService.js";
+import { listAgents } from "../../services/agentService.js";
+import { apiGet } from "../../api/axios.js";
+import { endpoints } from "../../api/endpoints.js";
 import DataTable from "../../components/DataTable.jsx";
 import LogoLoader from "../../components/LogoLoader.jsx";
 import FicheDialog from "../../components/FicheDialog.jsx";
@@ -19,15 +24,23 @@ import SearchableSelect from "../../components/SearchableSelect.jsx";
 import ClientSelect from "../../components/ClientSelect.jsx";
 import { listClients } from "../../services/clientService.js";
 import { getToken } from "../../services/authService.js";
+import { saveRecolteOffline } from "../../utils/offline.js";
 
 const API_BASE = import.meta.env.VITE_API_URL || "http://127.0.0.1:8000/api";
 
 // Page Fiche de recolte (format papier)
 export default function HistoriqueRecoltes() {
   const { pushToast } = useToast();
-  const { isAdmin, isSuperviseur } = useAuth();
+  const { user, isAdmin, isSuperviseur, hasPermission } = useAuth();
+  const { setPendingCount } = useRecoltes();
 
-  const [tab, setTab] = useState("saisie"); // saisie | analyses | historique
+  const currentUserDisplayName = user
+    ? (`${user.first_name || ""} ${user.last_name || ""}`.trim() || user.username)
+    : "";
+
+  const [searchParams, setSearchParams] = useSearchParams();
+  const tab = searchParams.get("tab") || (isAdmin ? "historique" : "saisie");
+  const setTab = (key) => setSearchParams({ tab: key }, { replace: true });
 
   // Etat global de la fiche
   const [fiche, setFiche] = useState(ficheRecolteInitial);
@@ -40,6 +53,8 @@ export default function HistoriqueRecoltes() {
     secteurCodes.map((s) => s.code)
   );
   const [recolteursList, setRecolteursList] = useState([]);
+  const [agentsList, setAgentsList] = useState([]);
+  const [superviseursList, setSuperviseursList] = useState([]);
   const [clientsList, setClientsList] = useState([]);
   const [history, setHistory] = useState([]);
   const [loadingHistory, setLoadingHistory] = useState(false);
@@ -51,6 +66,76 @@ export default function HistoriqueRecoltes() {
   const [analyticsYear, setAnalyticsYear] = useState(new Date().getFullYear());
   const [activeChart, setActiveChart] = useState(null);
   const [success, setSuccess] = useState({ open: false, message: "" });
+  const [editingFicheId, setEditingFicheId] = useState(null);
+  const [confirmValidate, setConfirmValidate] = useState({ open: false, ficheId: null });
+  const [historyFilter, setHistoryFilter] = useState("all");
+
+  // Reconstruit l'état du formulaire depuis une fiche API (pour l'édition)
+  const ficheToFormState = (apiFiche, sectorList) => {
+    const codes = sectorList.map((s) => s.code);
+    let ctr = 0;
+    const uid = () => `${Date.now()}-${++ctr}`;
+    const emptySec = () => Object.fromEntries(codes.map((c) => [c, ""]));
+
+    const recMap = new Map();
+    for (const ligne of apiFiche.lignes || []) {
+      const nom = ligne.recolteur_nom_display || ligne.recolteur_nom || "";
+      if (!recMap.has(nom)) {
+        recMap.set(nom, {
+          id: `REC-${uid()}`,
+          nom,
+          regimes: { grands: emptySec(), moyens: emptySec(), petits: emptySec() },
+        });
+      }
+      const rec = recMap.get(nom);
+      const rk = ligne.regime_type;
+      for (const det of ligne.details || []) {
+        if (det.secteur_code && rec.regimes[rk] !== undefined) {
+          rec.regimes[rk][det.secteur_code] = det.quantite ?? "";
+        }
+      }
+    }
+
+    return {
+      date: apiFiche.date || "",
+      superviseurGeneral: apiFiche.superviseur_general || "",
+      bareme: {
+        grands: apiFiche.bareme_grands ?? 60,
+        moyens: apiFiche.bareme_moyens ?? 50,
+        petits: apiFiche.bareme_petits ?? 25,
+      },
+      depenses: {
+        nourriture: apiFiche.depense_nourriture ?? 0,
+        transport: apiFiche.depense_transport ?? 0,
+        salaire: apiFiche.depense_salaire ?? 0,
+      },
+      observations: apiFiche.observations || "",
+      superviseursAdjoints: (apiFiche.superviseurs_adjoints || []).map((s) => ({
+        id: `SA-${uid()}`,
+        nom: s.nom || "",
+        secteur: s.secteur_ou_recolteur || "",
+        agentId: s.agent || null,
+      })),
+      recolteurs: Array.from(recMap.values()),
+      recus: (apiFiche.recus || []).map((r) => ({
+        id: `RC-${uid()}`,
+        date: r.date || "",
+        client: r.client || "",
+        peseeKg: r.pesee_kg ?? "",
+        nonConformes: r.non_conformes_pct ?? "",
+        montant: r.montant ?? "",
+      })),
+    };
+  };
+
+  const handleEditFiche = (row) => {
+    const formState = ficheToFormState(row, secteurList);
+    setFiche(formState);
+    setEditingFicheId(row.id);
+    setFieldErrors({});
+    setTab("saisie");
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  };
 
   const scrollToFirstError = () => {
     requestAnimationFrame(() => {
@@ -192,6 +277,24 @@ export default function HistoriqueRecoltes() {
     }
   };
 
+  const loadAgents = async () => {
+    try {
+      const data = await listAgents();
+      setAgentsList(data || []);
+    } catch {
+      // silencieux
+    }
+  };
+
+  const loadSuperviseurs = async () => {
+    try {
+      const data = await apiGet(endpoints.superviseurs);
+      setSuperviseursList(data || []);
+    } catch {
+      // silencieux — le champ reste utilisable comme texte libre
+    }
+  };
+
   const loadClients = async () => {
     try {
       const data = await listClients();
@@ -217,7 +320,12 @@ export default function HistoriqueRecoltes() {
   useEffect(() => {
     loadSecteurs();
     loadRecolteurs();
+    loadAgents();
     loadClients();
+    loadSuperviseurs();
+    if (!isAdmin && currentUserDisplayName) {
+      setFiche((prev) => ({ ...prev, superviseurGeneral: currentUserDisplayName }));
+    }
   }, []);
 
   useEffect(() => {
@@ -276,7 +384,20 @@ export default function HistoriqueRecoltes() {
     }));
   };
 
-  // Superviseurs adjoints
+  // Superviseurs adjoints — sélection depuis la liste des agents (capture ID automatique)
+  const handleAdjointNomChange = (id, value) => {
+    const agent = agentsList.find(
+      (a) => (a.nom_complet || `${a.nom} ${a.prenom || ""}`.trim()) === value
+    );
+    setFiche((prev) => ({
+      ...prev,
+      superviseursAdjoints: prev.superviseursAdjoints.map((s) =>
+        s.id === id ? { ...s, nom: value, agentId: agent?.id || null } : s
+      ),
+    }));
+    clearNestedError("adjoints", id, "nom");
+  };
+
   const handleAdjointChange = (id, field, value) => {
     setFiche((prev) => ({
       ...prev,
@@ -292,7 +413,7 @@ export default function HistoriqueRecoltes() {
       ...prev,
       superviseursAdjoints: [
         ...prev.superviseursAdjoints,
-        { id: `SA-${Date.now()}`, nom: "", secteur: "" },
+        { id: `SA-${Date.now()}`, nom: "", secteur: "", agentId: null },
       ],
     }));
   };
@@ -425,6 +546,7 @@ export default function HistoriqueRecoltes() {
         superviseurs_adjoints.push({
           nom,
           secteur_ou_recolteur: secteur,
+          agent: s.agentId || null,
         });
       }
     }
@@ -560,10 +682,20 @@ export default function HistoriqueRecoltes() {
 
     try {
       setSaving(true);
-      await createFiche(payload);
-      setSuccess({ open: true, message: "Recolte ajoutee avec succes" });
-      // Historique: si deja charge, on le met a jour tout de suite.
-      // Analyses: on rafraichira automatiquement au moment ou l'onglet sera ouvert.
+
+      if (!navigator.onLine) {
+        await saveRecolteOffline(payload);
+        setSuccess({ open: true, message: "Fiche sauvegardee hors ligne — sera synchronisee a la reconnexion." });
+        return;
+      }
+
+      if (editingFicheId) {
+        await updateFiche(editingFicheId, payload);
+        setSuccess({ open: true, message: "Fiche mise a jour avec succes" });
+      } else {
+        await createFiche(payload);
+        setSuccess({ open: true, message: "Recolte ajoutee avec succes" });
+      }
       if (historyLoaded) loadHistory();
       if (analyticsLoadedOnce && tab === "analyses") loadAnalytics(analyticsYear);
     } catch (err) {
@@ -575,8 +707,12 @@ export default function HistoriqueRecoltes() {
 
   // Nouvelle fiche (reset)
   const handleReset = () => {
-    setFiche(ficheRecolteInitial);
+    setFiche({
+      ...ficheRecolteInitial,
+      superviseurGeneral: !isAdmin && currentUserDisplayName ? currentUserDisplayName : ficheRecolteInitial.superviseurGeneral,
+    });
     setFieldErrors({});
+    setEditingFicheId(null);
   };
 
   // Chargement de l'historique des fiches
@@ -586,6 +722,9 @@ export default function HistoriqueRecoltes() {
       const data = await listFiches();
       setHistory(data || []);
       setHistoryLoaded(true);
+      if (!isAdmin) {
+        setPendingCount((data || []).filter((f) => f.statut !== "valide").length);
+      }
     } catch (err) {
       pushToast({ type: "error", title: "Recoltes", message: err.message });
     } finally {
@@ -596,14 +735,40 @@ export default function HistoriqueRecoltes() {
   const handleStatutChange = async (ficheId, newStatut) => {
     try {
       await patchFiche(ficheId, { statut: newStatut });
-      setHistory((prev) =>
-        prev.map((f) => (f.id === ficheId ? { ...f, statut: newStatut } : f))
-      );
-      const labels = { soumis: "soumise", valide: "validee", brouillon: "rejetee" };
+      const now = new Date().toISOString();
+      setHistory((prev) => {
+        const next = prev.map((f) =>
+          f.id === ficheId
+            ? {
+                ...f,
+                statut: newStatut,
+                ...(newStatut === "valide" && {
+                  validated_by_display: currentUserDisplayName || f.validated_by_display,
+                  validated_at: now,
+                }),
+              }
+            : f
+        );
+        if (!isAdmin) {
+          setPendingCount(next.filter((f) => f.statut !== "valide").length);
+        }
+        return next;
+      });
+      const labels = { valide: "validee" };
       pushToast({ type: "success", title: "Fiche", message: `Fiche ${labels[newStatut] || newStatut}` });
     } catch (err) {
       pushToast({ type: "error", title: "Statut", message: err.message });
     }
+  };
+
+  const handleConfirmValider = (ficheId) => {
+    setConfirmValidate({ open: true, ficheId });
+  };
+
+  const handleConfirmOk = () => {
+    const { ficheId } = confirmValidate;
+    setConfirmValidate({ open: false, ficheId: null });
+    handleStatutChange(ficheId, "valide");
   };
 
   const handleExport = async () => {
@@ -658,61 +823,112 @@ export default function HistoriqueRecoltes() {
     });
   }, [history]);
 
-  const historyColumns = [
-    { key: "date", label: "Date" },
+  const fmtDateTime = (iso) => {
+    if (!iso) return "-";
+    const d = new Date(iso);
+    return d.toLocaleDateString("fr-FR", { day: "2-digit", month: "2-digit", year: "numeric" })
+      + " " + d.toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" });
+  };
+
+  // Colonnes admin : uniquement les fiches validées, avec traçabilité validation
+  const adminColumns = [
+    { key: "date", label: "Date récolte" },
+    { key: "superviseur_general", label: "Superviseur", render: (row) => row.superviseur_general || "-" },
+    { key: "total_regimes", label: "Total régimes" },
+    { key: "nb_recolteurs", label: "Récolteurs" },
     {
-      key: "superviseur_general",
-      label: "Superviseur",
-      render: (row) => row.superviseur_general || "-",
+      key: "validated_by_display",
+      label: "Validée par",
+      render: (row) => row.validated_by_display || "-",
     },
+    {
+      key: "validated_at",
+      label: "Date validation",
+      render: (row) => fmtDateTime(row.validated_at),
+    },
+    {
+      key: "actions",
+      label: "Actions",
+      render: (row) => (
+        <div className="row-actions">
+          <button onClick={() => setSelectedFiche(row)}>Voir</button>
+        </div>
+      ),
+    },
+  ];
+
+  // Colonnes superviseur : toutes ses fiches, statut clair, boutons Modifier + Valider
+  const superviseurColumns = [
+    { key: "date", label: "Date recolte" },
     { key: "total_regimes", label: "Total regimes" },
     { key: "nb_recolteurs", label: "Recolteurs" },
-    { key: "nb_recus", label: "Recus" },
     {
       key: "statut",
       label: "Statut",
       render: (row) => {
-        const s = row.statut || "brouillon";
-        return <span className={`statut-badge statut-${s}`}>{row.statut_display || s}</span>;
+        const valide = row.statut === "valide";
+        return (
+          <span style={{
+            display: "inline-block",
+            padding: "2px 10px",
+            borderRadius: 12,
+            fontSize: 12,
+            fontWeight: 700,
+            background: valide ? "#c8e6c9" : "#fff9c4",
+            color: valide ? "#1b5e20" : "#f57f17",
+          }}>
+            {valide ? "Validee" : "En attente"}
+          </span>
+        );
       },
     },
     {
       key: "actions",
       label: "Actions",
       render: (row) => {
-        const s = row.statut || "brouillon";
+        const nonValide = row.statut !== "valide";
         return (
           <div className="row-actions">
             <button onClick={() => setSelectedFiche(row)}>Voir</button>
-            {s === "brouillon" && (isSuperviseur || isAdmin) && (
+            {nonValide && (
               <button
-                className="btn-warning btn-sm"
-                onClick={() => handleStatutChange(row.id, "soumis")}
+                className="btn-ghost btn-sm"
+                onClick={() => handleEditFiche(row)}
               >
-                Soumettre
+                Modifier
               </button>
             )}
-            {s === "soumis" && isAdmin && (
-              <>
-                <button
-                  className="btn-primary btn-sm"
-                  onClick={() => handleStatutChange(row.id, "valide")}
-                >
-                  Valider
-                </button>
-                <button
-                  className="btn-ghost btn-sm"
-                  onClick={() => handleStatutChange(row.id, "brouillon")}
-                >
-                  Rejeter
-                </button>
-              </>
+            {nonValide && (
+              <button
+                className="btn-primary btn-sm"
+                onClick={() => handleConfirmValider(row.id)}
+              >
+                Valider
+              </button>
             )}
           </div>
         );
       },
     },
   ];
+
+  const historyColumns = isAdmin ? adminColumns : superviseurColumns;
+  const displayRows = isAdmin
+    ? historyRows.filter((r) => r.statut === "valide")
+    : historyRows;
+
+  // Filtres pour le superviseur
+  const pendingRows = displayRows.filter((r) => r.statut !== "valide");
+  const validatedRows = displayRows.filter((r) => r.statut === "valide");
+  const filteredRows = isSuperviseur
+    ? historyFilter === "pending"
+      ? pendingRows
+      : historyFilter === "valide"
+      ? validatedRows
+      : displayRows
+    : displayRows;
+
+  const localPendingCount = isSuperviseur ? pendingRows.length : 0;
 
   return (
     <div className="page fiche">
@@ -722,13 +938,13 @@ export default function HistoriqueRecoltes() {
           <p className="dashboard-subtitle">Saisie, analyses et historique</p>
         </div>
 
-        {tab === "saisie" && (
+        {tab === "saisie" && !isAdmin && (
           <div className="row-actions">
             <button className="btn-ghost" onClick={handleReset}>
-              Nouvelle fiche
+              {editingFicheId ? "Annuler" : "Nouvelle fiche"}
             </button>
             <button className="btn-primary" onClick={handleSave} disabled={saving}>
-              {saving ? "Enregistrement..." : "Enregistrer"}
+              {saving ? "Enregistrement..." : editingFicheId ? "Mettre a jour" : "Enregistrer"}
             </button>
           </div>
         )}
@@ -755,17 +971,21 @@ export default function HistoriqueRecoltes() {
             >
               {loadingAnalytics ? "Chargement..." : "Rafraichir"}
             </button>
-            <button className="btn-ghost" onClick={handleExport}>
-              Exporter Excel
-            </button>
+            {hasPermission("exporter_donnees") && (
+              <button className="btn-ghost" onClick={handleExport}>
+                Exporter Excel
+              </button>
+            )}
           </div>
         )}
 
         {tab === "historique" && (
           <div className="row-actions">
-            <button className="btn-ghost" onClick={handleExport}>
-              Exporter Excel
-            </button>
+            {hasPermission("exporter_donnees") && (
+              <button className="btn-ghost" onClick={handleExport}>
+                Exporter Excel
+              </button>
+            )}
             <button className="btn-ghost" onClick={loadHistory} disabled={loadingHistory}>
               {loadingHistory ? "Chargement..." : "Rafraichir"}
             </button>
@@ -773,28 +993,26 @@ export default function HistoriqueRecoltes() {
         )}
       </div>
 
-      <div className="tabs">
-        <button
-          className={`tab-btn ${tab === "saisie" ? "active" : ""}`}
-          onClick={() => setTab("saisie")}
-        >
-          Saisie
-        </button>
-        <button
-          className={`tab-btn ${tab === "analyses" ? "active" : ""}`}
-          onClick={() => setTab("analyses")}
-        >
-          Analyses
-        </button>
-        <button
-          className={`tab-btn ${tab === "historique" ? "active" : ""}`}
-          onClick={() => setTab("historique")}
-        >
-          Historique
-        </button>
-      </div>
+      {tab === "saisie" && isAdmin && (
+        <div style={{ padding: "40px 0", textAlign: "center", color: "#888" }}>
+          La saisie des fiches de recolte est reservee aux superviseurs.
+        </div>
+      )}
 
-      {tab === "saisie" && (
+      {tab === "saisie" && !isAdmin && editingFicheId && (
+        <div style={{
+          background: "#e3f2fd", border: "1px solid #90caf9",
+          borderRadius: 8, padding: "10px 16px", marginBottom: 12,
+          fontSize: 13, display: "flex", alignItems: "center", gap: 10,
+        }}>
+          <span style={{ fontSize: 16 }}>✏️</span>
+          <span>
+            Modification de la fiche du <strong>{fiche.date || "..."}</strong> — les donnees sont pre-remplies.
+          </span>
+        </div>
+      )}
+
+      {tab === "saisie" && !isAdmin && (
         <>
 
       {/* En-tete de la fiche */}
@@ -818,13 +1036,26 @@ export default function HistoriqueRecoltes() {
           </label>
           <label>
             Superviseur general
-            <input
-              name="superviseurGeneral"
-              className={`fiche-input ${fieldErrors.superviseurGeneral ? "input-error" : ""}`}
-              value={fiche.superviseurGeneral}
-              onChange={handleHeaderChange}
-              placeholder="Nom du superviseur"
-            />
+            {isAdmin ? (
+              <select
+                name="superviseurGeneral"
+                className={`fiche-input ${fieldErrors.superviseurGeneral ? "input-error" : ""}`}
+                value={fiche.superviseurGeneral}
+                onChange={handleHeaderChange}
+              >
+                <option value="">-- Choisir un superviseur --</option>
+                {superviseursList.map((s) => (
+                  <option key={s.id} value={s.display_name}>{s.display_name}</option>
+                ))}
+              </select>
+            ) : (
+              <input
+                className="fiche-input"
+                value={fiche.superviseurGeneral}
+                readOnly
+                style={{ background: "#f5f5f5", cursor: "default" }}
+              />
+            )}
             {fieldErrors.superviseurGeneral && (
               <span className="field-error">{fieldErrors.superviseurGeneral}</span>
             )}
@@ -856,12 +1087,17 @@ export default function HistoriqueRecoltes() {
               {fiche.superviseursAdjoints.map((s) => (
                 <tr key={s.id}>
                   <td>
-                    <input
-                      className={`fiche-input ${
-                        fieldErrors.adjoints?.[s.id]?.nom ? "input-error" : ""
-                      }`}
+                    <SearchableSelect
                       value={s.nom}
-                      onChange={(e) => handleAdjointChange(s.id, "nom", e.target.value)}
+                      options={(agentsList || []).map((a) => ({
+                        value: a.nom_complet || `${a.nom} ${a.prenom || ""}`.trim(),
+                        label: a.nom_complet || `${a.nom} ${a.prenom || ""}`.trim(),
+                      }))}
+                      onChange={(v) => handleAdjointNomChange(s.id, v)}
+                      placeholder="Nom ou saisie libre"
+                      allowCustom
+                      clearable
+                      className={fieldErrors.adjoints?.[s.id]?.nom ? "input-error" : ""}
                     />
                     {fieldErrors.adjoints?.[s.id]?.nom && (
                       <div className="field-error">{fieldErrors.adjoints[s.id].nom}</div>
@@ -1177,7 +1413,13 @@ export default function HistoriqueRecoltes() {
         </>
       )}
 
-      {tab === "analyses" && (
+      {tab === "analyses" && !hasPermission("voir_analyses") && (
+        <div style={{ padding: "40px 0", textAlign: "center", color: "#888" }}>
+          Vous n'avez pas l'autorisation d'acceder aux analyses. Contactez l'administrateur.
+        </div>
+      )}
+
+      {tab === "analyses" && hasPermission("voir_analyses") && (
         <section className="fiche-section fiche-analytics">
           <h3>Analyses et comparaisons</h3>
 
@@ -1292,11 +1534,64 @@ export default function HistoriqueRecoltes() {
 
       {tab === "historique" && (
         <section className="fiche-section fiche-history">
-          <h3>Historique des fiches</h3>
+          {/* Banniere fiches en attente */}
+          {isSuperviseur && historyLoaded && localPendingCount > 0 && (
+            <div style={{
+              background: "#fff8e1", border: "1px solid #f9a825",
+              borderRadius: 8, padding: "10px 16px", marginBottom: 16,
+              display: "flex", alignItems: "center", gap: 10, fontSize: 13,
+            }}>
+              <span style={{ fontSize: 18 }}>⏳</span>
+              <span>
+                <strong style={{ color: "#f57f17" }}>{localPendingCount} fiche{localPendingCount > 1 ? "s" : ""} en attente</strong>
+                {" "}de validation — cliquez sur <strong>Valider</strong> pour les confirmer.
+              </span>
+            </div>
+          )}
+
+          <h3>{isAdmin ? "Fiches validees" : "Mes fiches de recolte"}</h3>
+
+          {/* Filtres rapides — superviseur uniquement */}
+          {isSuperviseur && historyLoaded && (
+            <div style={{ display: "flex", gap: 8, marginBottom: 16, flexWrap: "wrap" }}>
+              {[
+                { key: "all",     label: "Toutes",      count: displayRows.length },
+                { key: "pending", label: "En attente",  count: pendingRows.length },
+                { key: "valide",  label: "Validees",    count: validatedRows.length },
+              ].map(({ key, label, count }) => (
+                <button
+                  key={key}
+                  onClick={() => setHistoryFilter(key)}
+                  style={{
+                    padding: "4px 14px",
+                    borderRadius: 20,
+                    border: historyFilter === key ? "2px solid #2e7d32" : "2px solid #e0e0e0",
+                    background: historyFilter === key ? "#e8f5e9" : "transparent",
+                    color: historyFilter === key ? "#2e7d32" : "#666",
+                    fontWeight: historyFilter === key ? 700 : 400,
+                    fontSize: 13,
+                    cursor: "pointer",
+                  }}
+                >
+                  {label} ({count})
+                </button>
+              ))}
+            </div>
+          )}
+
           {loadingHistory ? (
             <LogoLoader compact size={70} />
           ) : (
-            <DataTable columns={historyColumns} rows={historyRows} pageSize={5} />
+            <>
+              {isAdmin && displayRows.length === 0 && (
+                <p style={{ color: "#aaa", textAlign: "center", padding: 24 }}>
+                  Aucune fiche validee pour le moment.
+                </p>
+              )}
+              {(!isAdmin || displayRows.length > 0) && (
+                <DataTable columns={historyColumns} rows={filteredRows} pageSize={5} />
+              )}
+            </>
           )}
         </section>
       )}
@@ -1316,11 +1611,41 @@ export default function HistoriqueRecoltes() {
       <SuccessDialog
         open={success.open}
         message={success.message}
+        actions={!isAdmin ? [{
+          label: "Aller valider",
+          className: "btn-primary",
+          onClick: () => {
+            setSuccess({ open: false, message: "" });
+            handleReset();
+            setTab("historique");
+          },
+        }] : []}
         onClose={() => {
           setSuccess({ open: false, message: "" });
           handleReset();
         }}
       />
+
+      {/* Dialog de confirmation de validation */}
+      {confirmValidate.open && (
+        <div className="dialog-backdrop" onClick={() => setConfirmValidate({ open: false, ficheId: null })}>
+          <div className="dialog dialog-sm" onClick={(e) => e.stopPropagation()}>
+            <h3>Confirmer la validation</h3>
+            <p style={{ fontSize: 14, color: "#555", margin: "12px 0 20px" }}>
+              Valider cette fiche signifie que les donnees ont ete verifiees et sont correctes.
+              L'administrateur sera notifie. Cette action ne peut pas etre annulee sans intervention de l'administrateur.
+            </p>
+            <div className="dialog-actions">
+              <button className="btn-ghost" onClick={() => setConfirmValidate({ open: false, ficheId: null })}>
+                Annuler
+              </button>
+              <button className="btn-primary" onClick={handleConfirmOk}>
+                Oui, valider
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

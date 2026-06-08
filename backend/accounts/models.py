@@ -27,6 +27,21 @@ class Notification(models.Model):
         return f"{self.user.username} — {self.message[:50]}"
 
 
+class Droit(models.Model):
+    """Permission fonctionnelle attribuable à un superviseur par l'admin."""
+    code = models.CharField(max_length=60, unique=True)
+    label = models.CharField(max_length=120)
+    description = models.TextField(blank=True)
+    ordre = models.PositiveSmallIntegerField(default=0)
+
+    class Meta:
+        db_table = "droit"
+        ordering = ["ordre", "label"]
+
+    def __str__(self):
+        return self.label
+
+
 class UserProfile(models.Model):
     ROLE_ADMIN = "admin"
     ROLE_SUPERVISEUR = "superviseur"
@@ -45,6 +60,7 @@ class UserProfile(models.Model):
     role = models.CharField(max_length=30, choices=ROLE_CHOICES, default=ROLE_SUPERVISEUR)
     must_change_password = models.BooleanField(default=False)
     numero_telephone = models.CharField(max_length=20, blank=True, default="")
+    droits = models.ManyToManyField(Droit, blank=True, related_name="profils")
 
     class Meta:
         db_table = "profil_utilisateur"

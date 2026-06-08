@@ -88,6 +88,8 @@ export default function GestionUtilisateurs() {
   const [saving, setSaving] = useState(false);
   const [errors, setErrors] = useState({});
   const [createdCredentials, setCreatedCredentials] = useState(null);
+  const [droitsList, setDroitsList] = useState([]);
+  const [selectedPermissions, setSelectedPermissions] = useState([]);
 
   const fetchUsers = async () => {
     try {
@@ -100,14 +102,17 @@ export default function GestionUtilisateurs() {
     }
   };
 
-  useEffect(() => { fetchUsers(); }, []);
-
-  const openCreate = () => {
-    setEditingUser(null);
-    setForm(emptyForm);
-    setErrors({});
-    setShowForm(true);
+  const fetchDroits = async () => {
+    try {
+      const data = await apiGet(endpoints.droits);
+      setDroitsList(data || []);
+    } catch {
+      // silencieux
+    }
   };
+
+  useEffect(() => { fetchUsers(); fetchDroits(); }, []);
+
 
   const openEdit = (u) => {
     setEditingUser(u);
@@ -120,6 +125,15 @@ export default function GestionUtilisateurs() {
       numero_telephone: u.numero_telephone || "",
       role: u.role,
     });
+    setSelectedPermissions(u.permissions || []);
+    setErrors({});
+    setShowForm(true);
+  };
+
+  const openCreate = () => {
+    setEditingUser(null);
+    setForm(emptyForm);
+    setSelectedPermissions([]);
     setErrors({});
     setShowForm(true);
   };
@@ -153,6 +167,9 @@ export default function GestionUtilisateurs() {
 
       if (editingUser) {
         delete payload.username;
+        if (editingUser.role === "superviseur" || form.role === "superviseur") {
+          payload.permissions = selectedPermissions;
+        }
         await apiPatch(`${endpoints.users}${editingUser.id}/`, payload);
         pushToast({ type: "success", title: "Utilisateur modifie", message: `${editingUser.username} mis a jour` });
         closeForm();
@@ -414,6 +431,53 @@ export default function GestionUtilisateurs() {
                       : "&#128275; Acces complet a toute l'application"}
                   </small>
                 </div>
+
+                {/* Permissions — visible uniquement pour les superviseurs */}
+                {(form.role === "superviseur") && editingUser && droitsList.length > 0 && (
+                  <>
+                    <div className="modal-section-label" style={{ marginTop: 8 }}>
+                      Droits accordes a ce superviseur
+                    </div>
+                    <div style={{
+                      background: "#f9fbe7",
+                      border: "1px solid #dce775",
+                      borderRadius: 8,
+                      padding: "12px 14px",
+                      display: "flex",
+                      flexDirection: "column",
+                      gap: 10,
+                    }}>
+                      {droitsList.map((d) => {
+                        const checked = selectedPermissions.includes(d.code);
+                        return (
+                          <label
+                            key={d.code}
+                            style={{ display: "flex", alignItems: "flex-start", gap: 10, cursor: "pointer" }}
+                          >
+                            <input
+                              type="checkbox"
+                              checked={checked}
+                              style={{ marginTop: 3, flexShrink: 0 }}
+                              onChange={() =>
+                                setSelectedPermissions((prev) =>
+                                  checked ? prev.filter((c) => c !== d.code) : [...prev, d.code]
+                                )
+                              }
+                            />
+                            <span>
+                              <span style={{ fontWeight: 600, fontSize: 13 }}>{d.label}</span>
+                              {d.description && (
+                                <span style={{ display: "block", fontSize: 11, color: "#666" }}>
+                                  {d.description}
+                                </span>
+                              )}
+                            </span>
+                          </label>
+                        );
+                      })}
+                    </div>
+                  </>
+                )}
 
                 {errors.non_field_errors && (
                   <p className="mfield-error">{errors.non_field_errors}</p>

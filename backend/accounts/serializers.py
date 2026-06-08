@@ -1,7 +1,13 @@
 from django.contrib.auth.models import User
 from rest_framework import serializers
 
-from .models import UserProfile, AuditLog
+from .models import UserProfile, AuditLog, Droit
+
+
+class DroitSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Droit
+        fields = ["id", "code", "label", "description", "ordre"]
 
 
 class UserListSerializer(serializers.ModelSerializer):
@@ -9,13 +15,21 @@ class UserListSerializer(serializers.ModelSerializer):
     role_display = serializers.CharField(source="profile.get_role_display", read_only=True)
     must_change_password = serializers.BooleanField(source="profile.must_change_password", read_only=True)
     numero_telephone = serializers.CharField(source="profile.numero_telephone", read_only=True)
+    permissions = serializers.SerializerMethodField()
 
     class Meta:
         model = User
         fields = [
             "id", "username", "email", "first_name", "last_name",
-            "is_active", "role", "role_display", "must_change_password", "numero_telephone",
+            "is_active", "role", "role_display", "must_change_password",
+            "numero_telephone", "permissions",
         ]
+
+    def get_permissions(self, obj):
+        try:
+            return list(obj.profile.droits.values_list("code", flat=True))
+        except Exception:
+            return []
 
 
 class CreateUserSerializer(serializers.Serializer):

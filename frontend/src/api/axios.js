@@ -6,10 +6,11 @@ const API_BASE = import.meta.env.VITE_API_URL || "http://127.0.0.1:8000/api";
 // Helper pour les requetes HTTP
 async function apiRequest(path, options = {}) {
   const token = getToken();
-  const headers = {
-    "Content-Type": "application/json",
-    ...(options.headers || {}),
-  };
+  // Ne pas forcer Content-Type pour FormData (le navigateur le gère avec le boundary)
+  const isFormData = options.body instanceof FormData;
+  const headers = isFormData
+    ? { ...(options.headers || {}) }
+    : { "Content-Type": "application/json", ...(options.headers || {}) };
 
   if (token) {
     headers.Authorization = `Token ${token}`;
@@ -61,3 +62,9 @@ export const apiPatch = (path, body) =>
   apiRequest(path, { method: "PATCH", body: JSON.stringify(body) });
 export const apiDelete = (path) =>
   apiRequest(path, { method: "DELETE" });
+
+// Requêtes multipart (FormData) — Content-Type géré automatiquement par le navigateur
+export const apiPostMultipart = (path, formData) =>
+  apiRequest(path, { method: "POST", body: formData });
+export const apiPutMultipart = (path, formData) =>
+  apiRequest(path, { method: "PUT", body: formData });

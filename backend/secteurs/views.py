@@ -113,6 +113,23 @@ class SecteurViewSet(viewsets.ModelViewSet):
         yearly_map = {r["ligne__fiche__date__year"]: int(r["total"] or 0) for r in yearly_qs}
         yearly_labels = list(range(start_year, year + 1))
 
+        yearly_regime_qs = (
+            FicheRecolteDetail.objects.filter(secteur=secteur, ligne__fiche__date__year__gte=start_year)
+            .values("ligne__fiche__date__year", "ligne__regime_type")
+            .annotate(total=Sum("quantite"))
+        )
+        grands_by_year, moyens_by_year, petits_by_year = {}, {}, {}
+        for r in yearly_regime_qs:
+            yr = r["ligne__fiche__date__year"]
+            t = int(r["total"] or 0)
+            rt = r["ligne__regime_type"]
+            if rt == "grands":
+                grands_by_year[yr] = grands_by_year.get(yr, 0) + t
+            elif rt == "moyens":
+                moyens_by_year[yr] = moyens_by_year.get(yr, 0) + t
+            elif rt == "petits":
+                petits_by_year[yr] = petits_by_year.get(yr, 0) + t
+
         total_year = (
             FicheRecolteDetail.objects.filter(secteur=secteur, ligne__fiche__date__year=year)
             .aggregate(total=Sum("quantite"))["total"] or 0
@@ -120,27 +137,48 @@ class SecteurViewSet(viewsets.ModelViewSet):
         superficie = float(secteur.superficie_ha or 0)
         rendement_ha = round(float(total_year) / superficie, 4) if superficie else 0
 
+        regime_qs = (
+            FicheRecolteDetail.objects.filter(secteur=secteur, ligne__fiche__date__year=year)
+            .values("ligne__regime_type")
+            .annotate(total=Sum("quantite"))
+        )
+        regime_map = {r["ligne__regime_type"]: int(r["total"] or 0) for r in regime_qs}
+
+        nb_recolteurs_actifs = (
+            Personnel.objects.filter(
+                lignes_recolte__details__secteur=secteur,
+                lignes_recolte__fiche__date__year=year,
+            )
+            .distinct()
+            .count()
+        )
+
         top = (
             Personnel.objects.filter(
                 lignes_recolte__details__secteur=secteur,
                 lignes_recolte__fiche__date__year=year,
             )
             .annotate(total=Coalesce(Sum("lignes_recolte__details__quantite"), 0))
-            .values("id", "code", "nom", "total")
+            .values("id", "numero_telephone", "nom", "total")
             .order_by("-total")[:10]
         )
 
-        fiches = (
+        all_fiches = list(
             FicheRecolte.objects.filter(lignes__details__secteur=secteur, date__year=year)
-            .order_by("-date").distinct()[:10]
+            .order_by("date").distinct()
         )
-        last_rows = []
-        for f in fiches:
+        fiches_annee_rows = []
+        for f in all_fiches:
             qty = (
                 FicheRecolteDetail.objects.filter(secteur=secteur, ligne__fiche=f)
                 .aggregate(total=Sum("quantite"))["total"] or 0
             )
-            last_rows.append({"fiche_id": f.id, "date": f.date, "total_regimes": int(qty)})
+            fiches_annee_rows.append({
+                "fiche_id": f.id,
+                "date": str(f.date),
+                "total_regimes": int(qty),
+            })
+        last_rows = list(reversed(fiches_annee_rows[-10:]))
 
         return Response({
             "secteur": {
@@ -151,11 +189,31 @@ class SecteurViewSet(viewsets.ModelViewSet):
                 "rendement_cible_t_ha": float(secteur.rendement_cible_t_ha) if secteur.rendement_cible_t_ha else None,
             },
             "year": year,
-            "monthly": {"current": monthly_totals(year), "previous": monthly_totals(prev_year)},
-            "yearly": {"labels": yearly_labels, "data": [yearly_map.get(y, 0) for y in yearly_labels]},
-            "stats": {"total_regimes": int(total_year), "rendement_ha": rendement_ha},
+            "monthly": {
+                "current":  monthly_totals(year),
+                "previous": monthly_totals(prev_year),
+                "prev2":    monthly_totals(year - 2),
+            },
+            "yearly": {
+                "labels": yearly_labels,
+                "data":   [yearly_map.get(y, 0)    for y in yearly_labels],
+                "grands": [grands_by_year.get(y, 0) for y in yearly_labels],
+                "moyens": [moyens_by_year.get(y, 0) for y in yearly_labels],
+                "petits": [petits_by_year.get(y, 0) for y in yearly_labels],
+            },
+            "stats": {
+                "total_regimes": int(total_year),
+                "rendement_ha": rendement_ha,
+                "nb_recolteurs_actifs": nb_recolteurs_actifs,
+                "regime_breakdown": {
+                    "grands": regime_map.get("grands", 0),
+                    "moyens": regime_map.get("moyens", 0),
+                    "petits": regime_map.get("petits", 0),
+                },
+            },
             "top_recolteurs": list(top),
             "last_recoltes": last_rows,
+            "fiches_annee": fiches_annee_rows,
         })
 
     @action(detail=True, methods=["get"], url_path="export")
@@ -168,13 +226,13 @@ class SecteurViewSet(viewsets.ModelViewSet):
         wb = Workbook()
         ws = wb.active
         ws.title = f"Secteur {secteur.code}"
-        headers = ["Date", "Code récolteur", "Nom récolteur", "Type régime", "Quantité", "Fiche ID"]
+        headers = ["Date", "Téléphone récolteur", "Nom récolteur", "Type régime", "Quantité", "Fiche ID"]
         _style_header(ws, headers)
 
         qs = (
             FicheRecolteDetail.objects.select_related("ligne__fiche", "ligne__recolteur")
             .filter(secteur=secteur, ligne__fiche__date__year=year)
-            .values("ligne__fiche__date", "ligne__recolteur__code",
+            .values("ligne__fiche__date", "ligne__recolteur__numero_telephone",
                     "ligne__recolteur__nom", "ligne__recolteur_nom",
                     "ligne__regime_type", "quantite", "ligne__fiche__id")
             .order_by("ligne__fiche__date")
@@ -185,7 +243,7 @@ class SecteurViewSet(viewsets.ModelViewSet):
             nom = row["ligne__recolteur__nom"] or row["ligne__recolteur_nom"] or ""
             qty = int(row["quantite"] or 0)
             total_qty += qty
-            ws.append([str(row["ligne__fiche__date"]), row["ligne__recolteur__code"] or "",
+            ws.append([str(row["ligne__fiche__date"]), row["ligne__recolteur__numero_telephone"] or "",
                         nom, row["ligne__regime_type"], qty, row["ligne__fiche__id"]])
 
         total_row = ws.max_row + 1

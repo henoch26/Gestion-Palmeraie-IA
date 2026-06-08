@@ -1,11 +1,12 @@
 import { useEffect, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import DataTable from "../../components/DataTable.jsx";
 import LogoLoader from "../../components/LogoLoader.jsx";
 import ConfirmDialog from "../../components/ConfirmDialog.jsx";
 import RecolteurDialog from "../../components/RecolteurDialog.jsx";
 import SuccessDialog from "../../components/SuccessDialog.jsx";
 import { useToast } from "../../context/ToastContext.jsx";
+import { useAuth } from "../../context/AuthContext.jsx";
 import { createRecolteur, deleteRecolteur, getRecolteursStats, listRecolteurs, updateRecolteur } from "../../services/recolteurService.js";
 import { getToken } from "../../services/authService.js";
 
@@ -14,9 +15,13 @@ const API_BASE = import.meta.env.VITE_API_URL || "http://127.0.0.1:8000/api";
 // CRUD page for recolteurs (connecte a l'API)
 export default function ListeRecolteurs() {
   const { pushToast } = useToast();
+  const { hasPermission } = useAuth();
   const navigate = useNavigate();
+  const canWrite = hasPermission("gerer_recolteurs");
 
-  const [tab, setTab] = useState("liste"); // liste | stats
+  const [searchParams, setSearchParams] = useSearchParams();
+  const tab = searchParams.get("tab") || "liste"; // liste | stats
+  const setTab = (key) => setSearchParams({ tab: key }, { replace: true });
 
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -50,17 +55,11 @@ export default function ListeRecolteurs() {
     { key: "nom", label: "Nom" },
     { key: "lieu_residence", label: "Lieu de residence" },
     {
-      key: "paiement",
-      label: "Paiement mobile",
-      render: (row) => (
-        <span style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
-          {row.est_wave && <span className="badge badge-info">Wave</span>}
-          {row.est_mobile_money && (
-            <span className="badge badge-success">{row.operateur_mm_display || "MoMo"}</span>
-          )}
-          {!row.est_wave && !row.est_mobile_money && <span className="muted">—</span>}
-        </span>
-      ),
+      key: "est_wave",
+      label: "Wave",
+      render: (row) => row.est_wave
+        ? <span className="badge badge-info">Wave</span>
+        : <span className="muted">—</span>,
     },
     {
       key: "statut",
@@ -81,8 +80,12 @@ export default function ListeRecolteurs() {
       render: (row) => (
         <div className="row-actions">
           <button onClick={() => navigate(`/recolteurs/${row.id}`)}>Details</button>
-          <button onClick={() => { setEditing(row); setOpenForm(true); }}>Modifier</button>
-          <button onClick={() => setToDelete(row)}>Supprimer</button>
+          {canWrite && (
+            <button onClick={() => { setEditing(row); setOpenForm(true); }}>Modifier</button>
+          )}
+          {canWrite && (
+            <button onClick={() => setToDelete(row)}>Supprimer</button>
+          )}
         </div>
       ),
     },
@@ -146,31 +149,31 @@ export default function ListeRecolteurs() {
     }
   };
 
-  // Save (add or edit)
-  const handleSubmit = async (form) => {
+  const handleSubmit = async (data) => {
     try {
-      const payload = {
-        nom: form.nom,
-        lieu_residence: form.lieu_residence,
-        numero_telephone: form.numero_telephone,
-        numero_whatsapp: form.numero_whatsapp,
-        whatsapp_actif: form.whatsapp_actif,
-        est_wave: form.est_wave,
-        est_mobile_money: form.est_mobile_money,
-        operateur_mm: form.operateur_mm,
-      };
-
-      if (editing) {
-        await updateRecolteur(editing.id, payload);
-        setSuccess({ open: true, message: "Recolteur modifie avec succes" });
-      } else {
-        await createRecolteur(payload);
-        setSuccess({ open: true, message: "Recolteur ajoute avec succes" });
+      {
+        const payload = {
+          nom: data.nom,
+          lieu_residence: data.lieu_residence,
+          numero_telephone: data.numero_telephone,
+          whatsapp_actif: data.whatsapp_actif,
+          est_wave: data.est_wave,
+          date_naissance: data.date_naissance || null,
+        };
+        if (editing) {
+          await updateRecolteur(editing.id, payload);
+        } else {
+          await createRecolteur(payload);
+        }
       }
+      setSuccess({
+        open: true,
+        message: editing ? "Personnel modifié avec succès" : "Personnel ajouté avec succès",
+      });
       setOpenForm(false);
       load();
     } catch (err) {
-      pushToast({ type: "error", title: "Recolteurs", message: err.message });
+      pushToast({ type: "error", title: "Personnel", message: err.message });
     }
   };
 
@@ -200,23 +203,10 @@ export default function ListeRecolteurs() {
             </select>
           </label>
           <button className="btn-ghost" onClick={handleExport}>Exporter Excel</button>
-          <button className="btn-primary" onClick={handleAdd}>Ajouter</button>
+          {canWrite && (
+            <button className="btn-primary" onClick={handleAdd}>Ajouter</button>
+          )}
         </div>
-      </div>
-
-      <div className="tabs" style={{ marginTop: 12 }}>
-        <button
-          className={`tab-btn ${tab === "liste" ? "active" : ""}`}
-          onClick={() => setTab("liste")}
-        >
-          Liste
-        </button>
-        <button
-          className={`tab-btn ${tab === "stats" ? "active" : ""}`}
-          onClick={() => setTab("stats")}
-        >
-          Statistiques
-        </button>
       </div>
 
       {tab === "liste" && (
