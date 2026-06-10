@@ -1,9 +1,9 @@
-import ChartDataLabels from "chartjs-plugin-datalabels";
 import { useEffect, useMemo, useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import ChartCard from "../../components/ChartCard.jsx";
 import ChartDialog from "../../components/ChartDialog.jsx";
 import LogoLoader from "../../components/LogoLoader.jsx";
+import { useAuth } from "../../context/AuthContext.jsx";
 import { useToast } from "../../context/ToastContext.jsx";
 import { getRecolteurAnalytics } from "../../services/recolteurService.js";
 import { getToken } from "../../services/authService.js";
@@ -43,10 +43,15 @@ export default function DetailRecolteur() {
   const { id } = useParams();
   const navigate = useNavigate();
   const { pushToast } = useToast();
+  const { user, isAdmin } = useAuth();
+  const [searchParams] = useSearchParams();
+
+  const createdBy = !isAdmin ? (user?.id ?? null) : (searchParams.get("created_by") || null);
 
   const [year, setYear] = useState(new Date().getFullYear());
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(null);
   const [activeChart, setActiveChart] = useState(null);
 
   const years = useMemo(() => {
@@ -64,16 +69,18 @@ export default function DetailRecolteur() {
   const load = async () => {
     try {
       setLoading(true);
-      const d = await getRecolteurAnalytics(id, year);
+      setLoadError(null);
+      const d = await getRecolteurAnalytics(id, year, createdBy);
       setData(d);
     } catch (err) {
+      setLoadError(err.message);
       pushToast({ type: "error", title: "Recolteur", message: err.message });
     } finally {
       setLoading(false);
     }
   };
 
-  useEffect(() => { load(); }, [id, year]);
+  useEffect(() => { load(); }, [id, year, createdBy]);
 
   const handleExport = async () => {
     try {
@@ -94,10 +101,12 @@ export default function DetailRecolteur() {
     }
   };
 
+  const supNom = data?.filtre_superviseur?.actif ? data.filtre_superviseur.nom_complet : null;
+
   const monthlyChart = useMemo(() => {
     if (!data) return null;
     return {
-      title: `Evolution mensuelle ${data.year} vs ${data.year - 1}`,
+      title: `${data.recolteur?.nom} (${data.recolteur?.numero_telephone})${supNom ? ` · ${supNom}` : ""} — Évolution mensuelle ${data.year} vs ${data.year - 1}`,
       type: "line",
       data: {
         labels: data.monthly.current.labels,
@@ -112,14 +121,92 @@ export default function DetailRecolteur() {
 
   const yearlyChart = useMemo(() => {
     if (!data) return null;
+
+    const stackedBarLabelsPlugin = {
+      id: "stackedBarLabels",
+      afterDatasetsDraw(chart) {
+        if (chart.width < 320) return;
+        const { ctx } = chart;
+        const datasets = chart.data.datasets;
+
+        // Valeur sur chaque segment
+        datasets.forEach((dataset, di) => {
+          const meta = chart.getDatasetMeta(di);
+          if (meta.hidden) return;
+          meta.data.forEach((bar, i) => {
+            const value = Number(dataset.data[i]) || 0;
+            if (!value) return;
+            const { x, y, base } = bar.getProps(["x", "y", "base"], true);
+            const segH = Math.abs(base - y);
+            if (segH < 18) return;
+            ctx.save();
+            ctx.fillStyle = "#fff";
+            ctx.textAlign = "center";
+            ctx.textBaseline = "middle";
+            ctx.font = "bold 10px Manrope, sans-serif";
+            ctx.shadowColor = "rgba(0,0,0,0.4)";
+            ctx.shadowBlur = 3;
+            ctx.fillText(fmtInt(value), x, (y + base) / 2);
+            ctx.restore();
+          });
+        });
+
+        // Total au-dessus de chaque barre
+        const nBars = chart.data.labels.length;
+        for (let i = 0; i < nBars; i++) {
+          let total = 0;
+          let topY = Infinity;
+          datasets.forEach((ds, di) => {
+            const meta = chart.getDatasetMeta(di);
+            if (meta.hidden) return;
+            total += Number(ds.data[i]) || 0;
+            const { y } = meta.data[i].getProps(["y"], true);
+            if (y < topY) topY = y;
+          });
+          if (!total) continue;
+          const { x } = chart.getDatasetMeta(0).data[i].getProps(["x"], true);
+          ctx.save();
+          ctx.fillStyle = "#1f4e79";
+          ctx.textAlign = "center";
+          ctx.textBaseline = "bottom";
+          ctx.font = "bold 11px Manrope, sans-serif";
+          ctx.fillText(fmtInt(total), x, topY - 4);
+          ctx.restore();
+        }
+      },
+    };
+
     return {
-      title: "Production sur 5 ans",
+      title: `${data.recolteur?.nom} (${data.recolteur?.numero_telephone})${supNom ? ` · ${supNom}` : ""} — Production sur 5 ans`,
       type: "bar",
       data: {
         labels: data.yearly.labels,
-        datasets: [{ label: "Total regimes", data: data.yearly.data, backgroundColor: `${COLORS.green}99` }],
+        datasets: [
+          { label: "Grands", data: data.yearly.grands ?? [], backgroundColor: `${COLORS.green}cc`, stack: "regimes" },
+          { label: "Moyens", data: data.yearly.moyens ?? [], backgroundColor: `${COLORS.blue}cc`,  stack: "regimes" },
+          { label: "Petits", data: data.yearly.petits ?? [], backgroundColor: `${COLORS.amber}cc`, stack: "regimes" },
+        ],
       },
-      options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: "bottom" } }, scales: { x: { grid: { display: false } }, y: { beginAtZero: true } } },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        layout: { padding: { top: 24 } },
+        plugins: {
+          legend: { position: "bottom" },
+          subtitle: {
+            display: true,
+            text: "en nombre de régimes",
+            color: "#999",
+            font: { size: 11, style: "italic" },
+            padding: { bottom: 6 },
+          },
+          tooltip: { callbacks: { label: (ctx) => `${ctx.dataset.label} : ${fmtInt(ctx.parsed.y)} rég.` } },
+        },
+        scales: {
+          x: { stacked: true, grid: { display: false } },
+          y: { stacked: true, beginAtZero: true, ticks: { precision: 0 } },
+        },
+      },
+      plugins: [stackedBarLabelsPlugin],
     };
   }, [data]);
 
@@ -127,8 +214,55 @@ export default function DetailRecolteur() {
     if (!data) return null;
     const vals = [data.stats.grands, data.stats.moyens, data.stats.petits];
     const total = vals.reduce((s, v) => s + (v || 0), 0);
+
+    const regimesLabelsPlugin = {
+      id: "regimesLabels",
+      afterDatasetsDraw(chart) {
+        const { ctx, chartArea } = chart;
+
+        chart.data.datasets.forEach((dataset, di) => {
+          const meta = chart.getDatasetMeta(di);
+          if (meta.hidden) return;
+          meta.data.forEach((arc, i) => {
+            const value = Number(dataset.data[i]) || 0;
+            if (!value) return;
+            const pct = total > 0 ? ((value / total) * 100).toFixed(1) : "0";
+            const pos = arc.getCenterPoint();
+            ctx.save();
+            ctx.shadowColor = "rgba(0,0,0,0.4)";
+            ctx.shadowBlur = 3;
+            ctx.fillStyle = "#fff";
+            ctx.textAlign = "center";
+            ctx.textBaseline = "middle";
+            ctx.font = "bold 12px Manrope, sans-serif";
+            ctx.fillText(fmtInt(value), pos.x, pos.y - 7);
+            ctx.font = "10px Manrope, sans-serif";
+            ctx.fillText(`${pct}%`, pos.x, pos.y + 7);
+            ctx.restore();
+          });
+        });
+
+        // Total au centre du doughnut
+        const cx = (chartArea.left + chartArea.right) / 2;
+        const cy = (chartArea.top + chartArea.bottom) / 2;
+        ctx.save();
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.fillStyle = "#888";
+        ctx.font = "bold 10px Manrope, sans-serif";
+        ctx.fillText("TOTAL", cx, cy - 13);
+        ctx.fillStyle = "#222";
+        ctx.font = "bold 18px Manrope, sans-serif";
+        ctx.fillText(fmtInt(total), cx, cy + 3);
+        ctx.fillStyle = "#aaa";
+        ctx.font = "10px Manrope, sans-serif";
+        ctx.fillText("régimes", cx, cy + 18);
+        ctx.restore();
+      },
+    };
+
     return {
-      title: `Repartition par type de regime (${data.year})`,
+      title: `${data.recolteur?.nom} (${data.recolteur?.numero_telephone})${supNom ? ` · ${supNom}` : ""} — Répartition par type de régime (${data.year})`,
       type: "doughnut",
       data: {
         labels: ["Grands", "Moyens", "Petits"],
@@ -139,18 +273,17 @@ export default function DetailRecolteur() {
         maintainAspectRatio: false,
         plugins: {
           legend: { position: "right" },
-          datalabels: {
-            color: "#fff",
-            font: { weight: "bold", size: 12 },
-            formatter: (value) => {
-              if (!value || !total) return null;
-              const pct = Math.round((value / total) * 100);
-              return `${fmtInt(value)}\n(${pct}%)`;
-            },
+          subtitle: {
+            display: true,
+            text: "en nombre de régimes",
+            color: "#999",
+            font: { size: 11, style: "italic" },
+            padding: { bottom: 6 },
           },
+          tooltip: { callbacks: { label: (ctx) => `${ctx.label} : ${fmtInt(ctx.parsed)} rég.` } },
         },
       },
-      plugins: [ChartDataLabels],
+      plugins: [regimesLabelsPlugin],
     };
   }, [data]);
 
@@ -176,6 +309,11 @@ export default function DetailRecolteur() {
         <div>
           <h2 style={{ margin: 0 }}>{r?.nom || `Recolteur #${id}`}</h2>
           <p style={{ margin: 0, color: "#888", fontSize: 13 }}>{r?.numero_telephone} — Fiche individuelle</p>
+          {data?.filtre_superviseur?.actif && (
+            <p style={{ margin: "3px 0 0", fontSize: 13, color: "#1565c0", fontWeight: 600 }}>
+              Vue filtree : fiches de {data.filtre_superviseur.nom_complet}
+            </p>
+          )}
         </div>
         <div className="row-actions">
           <label className="inline-field">
@@ -188,10 +326,32 @@ export default function DetailRecolteur() {
         </div>
       </div>
 
-      {loading ? <LogoLoader label="Chargement..." /> : (
+      {loading ? <LogoLoader label="Chargement..." /> : loadError ? (
+        <div style={{
+          textAlign: "center", padding: "48px 24px",
+          background: "#fff", border: "1px solid #f5c6cb",
+          borderRadius: 12, marginTop: 16,
+        }}>
+          <p style={{ fontSize: 40, margin: "0 0 12px" }}>⚠️</p>
+          <h3 style={{ color: "#c62828", margin: "0 0 8px" }}>Récolteur introuvable</h3>
+          <p style={{ color: "#888", fontSize: 14, margin: "0 0 20px" }}>
+            Ce récolteur n&apos;existe plus ou a été supprimé de la base de données.
+          </p>
+          <button
+            onClick={() => navigate(-1)}
+            style={{
+              background: "#2e7d32", color: "#fff", border: "none",
+              borderRadius: 8, padding: "10px 24px", fontSize: 14,
+              fontWeight: 600, cursor: "pointer",
+            }}
+          >
+            ← Retour à la liste
+          </button>
+        </div>
+      ) : (
         <>
           {/* Carte identite + KPIs */}
-          <div style={{ display: "grid", gridTemplateColumns: "300px 1fr", gap: 20, marginBottom: 24 }}>
+          <div className="recolteur-identity-grid">
 
             {/* Carte identite */}
             <section className="stat-card" style={{ padding: 20 }}>
@@ -240,10 +400,14 @@ export default function DetailRecolteur() {
               <h3 style={{ margin: "0 0 12px", fontSize: 15 }}>Secteurs travailles en {year}</h3>
               <div style={{ display: "flex", flexWrap: "wrap", gap: 10 }}>
                 {data.secteurs.map((s) => (
-                  <div key={s.code} style={{
-                    background: "#e8f5e9", border: "1px solid #a5d6a7", borderRadius: 8,
-                    padding: "8px 16px", minWidth: 140,
-                  }}>
+                  <div
+                    key={s.code}
+                    onClick={() => navigate(`/secteurs/${s.id}${createdBy ? `?created_by=${createdBy}` : ""}`)}
+                    style={{
+                      background: "#e8f5e9", border: "1px solid #a5d6a7", borderRadius: 8,
+                      padding: "8px 16px", minWidth: 140, cursor: "pointer",
+                    }}
+                  >
                     <p style={{ margin: 0, fontWeight: 700, color: COLORS.green }}>{s.code}</p>
                     <p style={{ margin: "2px 0 0", fontSize: 12, color: "#555" }}>{s.nom}</p>
                     <p style={{ margin: "4px 0 0", fontSize: 13, fontWeight: 600 }}>{fmtInt(s.total_regimes)} reg.</p>
@@ -260,7 +424,7 @@ export default function DetailRecolteur() {
               <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
                 <thead>
                   <tr style={{ background: "#1f4e79", color: "#fff" }}>
-                    {["Date", "Statut", "Grands", "Moyens", "Petits", "Total", "Prix (FCFA)", "Salaire (FCFA)"].map((h) => (
+                    {["Date", "Statut", "Grands", "Moyens", "Petits", "Total", "Salaire (FCFA)"].map((h) => (
                       <th key={h} style={{ padding: "8px 12px", textAlign: "left", fontWeight: 600, whiteSpace: "nowrap" }}>{h}</th>
                     ))}
                   </tr>
@@ -276,12 +440,11 @@ export default function DetailRecolteur() {
                       <td style={{ padding: "7px 12px" }}>{fmtInt(f.moyens)}</td>
                       <td style={{ padding: "7px 12px" }}>{fmtInt(f.petits)}</td>
                       <td style={{ padding: "7px 12px", fontWeight: 700 }}>{fmtInt(f.total_regimes)}</td>
-                      <td style={{ padding: "7px 12px" }}>{fmtMoney(f.prix_fcfa)}</td>
                       <td style={{ padding: "7px 12px", color: COLORS.teal, fontWeight: 600 }}>{fmtMoney(f.salaire_fcfa)}</td>
                     </tr>
                   ))}
                   {!data?.last_fiches?.length && (
-                    <tr><td colSpan={8} style={{ padding: 16, textAlign: "center", color: "#aaa" }}>Aucune fiche pour {year}</td></tr>
+                    <tr><td colSpan={7} style={{ padding: 16, textAlign: "center", color: "#aaa" }}>Aucune fiche pour {year}</td></tr>
                   )}
                 </tbody>
               </table>

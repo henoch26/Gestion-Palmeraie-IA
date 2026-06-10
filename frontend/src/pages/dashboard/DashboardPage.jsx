@@ -78,7 +78,10 @@ function AlerteBandeau({ notifications }) {
 // ── Page principale ───────────────────────────────────────────────────────────
 export default function DashboardPage() {
   const { pushToast } = useToast();
-  const { isAdmin } = useAuth();
+  const { isAdmin, user } = useAuth();
+  const chartSubtitle = !isAdmin
+    ? `Superviseur : ${[user?.first_name, user?.last_name].filter(Boolean).join(" ") || user?.username || ""}`
+    : null;
   const navigate = useNavigate();
 
   const [searchParams, setSearchParams] = useSearchParams();
@@ -272,6 +275,7 @@ export default function DashboardPage() {
     const stackedBarLabelsPlugin = {
       id: "stackedBarLabels",
       afterDatasetsDraw(chart) {
+        if (chart.width < 320) return;
         const { ctx } = chart;
         const datasets = chart.data.datasets;
 
@@ -364,11 +368,13 @@ export default function DashboardPage() {
 
     const total = actifs.reduce((sum, r) => sum + (Number(r.production_regimes) || 0), 0);
 
-    // Plugin inline : affiche nb regimes + % sur chaque tranche
+    // Plugin inline : affiche nb regimes + % sur chaque tranche + total au centre
     const sectorLabelsPlugin = {
       id: "sectorLabels",
       afterDatasetsDraw(chart) {
-        const { ctx } = chart;
+        const { ctx, chartArea } = chart;
+
+        // Labels sur chaque tranche
         chart.data.datasets.forEach((dataset, di) => {
           const meta = chart.getDatasetMeta(di);
           if (meta.hidden) return;
@@ -390,6 +396,23 @@ export default function DashboardPage() {
             ctx.restore();
           });
         });
+
+        // Total au centre du doughnut
+        const cx = (chartArea.left + chartArea.right) / 2;
+        const cy = (chartArea.top + chartArea.bottom) / 2;
+        ctx.save();
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.fillStyle = "#888";
+        ctx.font = "bold 10px Manrope, sans-serif";
+        ctx.fillText("TOTAL", cx, cy - 13);
+        ctx.fillStyle = "#222";
+        ctx.font = "bold 18px Manrope, sans-serif";
+        ctx.fillText(fmtInt(total), cx, cy + 3);
+        ctx.fillStyle = "#aaa";
+        ctx.font = "10px Manrope, sans-serif";
+        ctx.fillText("régimes", cx, cy + 18);
+        ctx.restore();
       },
     };
 
@@ -574,24 +597,27 @@ export default function DashboardPage() {
                 {chartProdMensuelle && (
                   <ChartCard title={chartProdMensuelle.title} type={chartProdMensuelle.type}
                     data={chartProdMensuelle.data} options={chartProdMensuelle.options}
+                    subtitle={chartSubtitle}
                     onClick={() => setActiveChart(chartProdMensuelle)} />
                 )}
                 {chartProdCompare && (
                   <ChartCard title={chartProdCompare.title} type={chartProdCompare.type}
                     data={chartProdCompare.data} options={chartProdCompare.options}
+                    subtitle={chartSubtitle}
                     onClick={() => setActiveChart(chartProdCompare)} />
                 )}
                 {chartRegimesPie && (
                   <ChartCard title={chartRegimesPie.title} type={chartRegimesPie.type}
                     data={chartRegimesPie.data} options={chartRegimesPie.options}
                     plugins={chartRegimesPie.plugins}
+                    subtitle={chartSubtitle}
                     onClick={() => setActiveChart(chartRegimesPie)} />
                 )}
               </section>
 
               {/* Heatmap journalière */}
               {charts.production_par_date?.labels?.length > 0 && (
-                <div className="chart-card" style={{ marginTop: 14 }}>
+                <div className="chart-card" style={{ marginTop: 14, height: "auto" }}>
                   <div className="chart-card-head">
                     <h3>Production journalière {year} — Calendrier annuel</h3>
                   </div>
@@ -629,12 +655,14 @@ export default function DashboardPage() {
                   <ChartCard title={chartSecteursPie.title} type={chartSecteursPie.type}
                     data={chartSecteursPie.data} options={chartSecteursPie.options}
                     plugins={chartSecteursPie.plugins}
+                    subtitle={chartSubtitle}
                     onClick={() => setActiveChart(chartSecteursPie)} />
                 )}
                 {chartRegimesSecteur && (
                   <ChartCard title={chartRegimesSecteur.title} type={chartRegimesSecteur.type}
                     data={chartRegimesSecteur.data} options={chartRegimesSecteur.options}
                     plugins={chartRegimesSecteur.plugins}
+                    subtitle={chartSubtitle}
                     onClick={() => setActiveChart(chartRegimesSecteur)} />
                 )}
               </section>
@@ -721,6 +749,7 @@ export default function DashboardPage() {
                 <section style={{ marginTop: 24 }}>
                   <ChartCard title={chartVentesDepenses.title} type={chartVentesDepenses.type}
                     data={chartVentesDepenses.data} options={chartVentesDepenses.options}
+                    subtitle={chartSubtitle}
                     onClick={() => setActiveChart(chartVentesDepenses)} />
                 </section>
               )}
@@ -788,6 +817,7 @@ export default function DashboardPage() {
           open={!!activeChart}
           onClose={() => setActiveChart(null)}
           chart={activeChart}
+          subtitle={chartSubtitle}
         />
       )}
 

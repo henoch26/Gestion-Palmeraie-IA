@@ -57,7 +57,7 @@ function exportToExcel(title, chartData) {
 }
 
 // ── Composant principal ───────────────────────────────────────────────────────
-export default function ChartDialog({ open, onClose, chart }) {
+export default function ChartDialog({ open, onClose, chart, subtitle }) {
   const [instance, setInstance] = useState(null);
   useBodyScrollLock(!!open);
 
@@ -85,7 +85,7 @@ export default function ChartDialog({ open, onClose, chart }) {
   const handleExportExcel = () => exportToExcel(chart.title, chart.data);
 
   return (
-    <div className="dialog-backdrop" onClick={onClose}>
+    <div className="dialog-backdrop">
       <div
         className="dialog"
         style={{ maxWidth: 900, width: "90vw" }}
@@ -93,7 +93,14 @@ export default function ChartDialog({ open, onClose, chart }) {
       >
         {/* ── En-tête ── */}
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14 }}>
-          <h3 style={{ margin: 0, fontSize: 16 }}>{chart.title}</h3>
+          <div>
+            <h3 style={{ margin: 0, fontSize: 16 }}>{chart.title}</h3>
+            {subtitle && (
+              <p style={{ margin: "3px 0 0", fontSize: 11, color: "#888", fontStyle: "italic", fontWeight: 500 }}>
+                {subtitle}
+              </p>
+            )}
+          </div>
           <div style={{ display: "flex", gap: 8 }}>
             <button
               onClick={handleExportExcel}

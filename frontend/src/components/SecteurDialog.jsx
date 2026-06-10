@@ -88,7 +88,7 @@ export default function SecteurDialog({ open, onClose, onSubmit, initial }) {
   if (!open) return null;
 
   return (
-    <div className="dialog-backdrop" onClick={onClose}>
+    <div className="dialog-backdrop">
       <div className="dialog dialog-sm" onClick={(e) => e.stopPropagation()}>
         <button className="dialog-close" onClick={onClose}>Fermer</button>
 

@@ -24,12 +24,19 @@ def _recalculer_salaire(ligne: FicheRecolteLigne):
     ligne.salaire_calcule = salaire
 
 
+def _recalculer_depense_salaire(fiche: FicheRecolte):
+    """depense_salaire = somme automatique des salaire_calcule de toutes les lignes de la fiche."""
+    from django.db.models import Sum
+    try:
+        total = fiche.lignes.aggregate(t=Sum("salaire_calcule"))["t"] or Decimal("0")
+        FicheRecolte.objects.filter(pk=fiche.pk).update(depense_salaire=total)
+        fiche.depense_salaire = total
+    except Exception:
+        pass
+
+
 def _recalculer_depense_total(fiche: FicheRecolte):
-    """
-    depense_total = depense_nourriture + depense_transport + depense_salaire.
-    depense_salaire est saisi manuellement sur la fiche.
-    Utilise .update() pour éviter toute boucle de signal.
-    """
+    """depense_total = depense_nourriture + depense_transport + depense_salaire (auto)."""
     try:
         dep_n = fiche.depense_nourriture or Decimal("0")
         dep_t = fiche.depense_transport or Decimal("0")
@@ -46,7 +53,10 @@ def _recalculer_depense_total(fiche: FicheRecolte):
 @receiver(post_save, sender=FicheRecolteDetail)
 def on_detail_saved(sender, instance, **kwargs):
     try:
-        _recalculer_salaire(instance.ligne)
+        ligne = instance.ligne
+        _recalculer_salaire(ligne)
+        _recalculer_depense_salaire(ligne.fiche)
+        _recalculer_depense_total(ligne.fiche)
     except Exception:
         pass
 
@@ -54,7 +64,10 @@ def on_detail_saved(sender, instance, **kwargs):
 @receiver(post_delete, sender=FicheRecolteDetail)
 def on_detail_deleted(sender, instance, **kwargs):
     try:
-        _recalculer_salaire(instance.ligne)
+        ligne = instance.ligne
+        _recalculer_salaire(ligne)
+        _recalculer_depense_salaire(ligne.fiche)
+        _recalculer_depense_total(ligne.fiche)
     except Exception:
         pass
 

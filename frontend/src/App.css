@@ -476,11 +476,27 @@ body {
   gap: 16px;
 }
 
+.page-header,
 .page-header-row {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
+}
+
+/* Titre centré — pattern <div><h2>…</h2></div>  <button/> */
+.page-header > div:first-child,
+.page-header-row > div:first-child {
+  flex: 1;
+  text-align: center;
+}
+
+/* Titre centré — pattern <h2>  <div class="row-actions"> */
+.page-header-row > h2,
+.page-header-row > h3 {
+  flex: 1;
+  text-align: center;
+  margin: 0;
 }
 
 .dashboard-subtitle {
@@ -646,12 +662,43 @@ body {
   }
 }
 
+/* DetailSecteur — ligne 1 : 2 graphiques */
+.secteur-charts-row1 {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+
+/* DetailSecteur — ligne 2 : 3 graphiques */
+.secteur-charts-row2 {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 16px;
+}
+
+@media (max-width: 1100px) {
+  .secteur-charts-row2 {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+@media (max-width: 900px) {
+  .secteur-charts-row1,
+  .secteur-charts-row2 {
+    grid-template-columns: 1fr;
+  }
+}
+
 .chart-card {
   background: var(--white);
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
   padding: 14px;
   box-shadow: var(--shadow-sm);
+  display: flex;
+  flex-direction: column;
+  height: 300px;
 }
 
 .chart-card-head {
@@ -660,6 +707,7 @@ body {
   justify-content: space-between;
   gap: 12px;
   margin: 0 0 12px;
+  flex-shrink: 0;
 }
 
 .chart-card-head h3 {
@@ -667,10 +715,18 @@ body {
   color: var(--earth);
 }
 
+.chart-canvas-wrapper {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+}
+
 .chart-card canvas {
-  max-height: 220px;
-  max-width: 100%;
-  display: block;
+  position: absolute !important;
+  top: 0;
+  left: 0;
+  width: 100% !important;
+  height: 100% !important;
 }
 
 canvas {
@@ -839,6 +895,17 @@ canvas {
   border-radius: var(--radius-sm);
   cursor: pointer;
 }
+
+.btn-success {
+  border: 1px solid #388e3c;
+  background: #2e7d32;
+  color: #fff;
+  padding: 6px 12px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+.btn-success:hover { background: #388e3c; }
+.btn-success.btn-sm { padding: 4px 10px; font-size: 12px; }
 
 .row-actions {
   display: flex;
@@ -1411,9 +1478,28 @@ canvas {
   height: min(620px, 70vh);
 }
 
-.dialog .chart-card canvas {
+.dialog .chart-card .chart-canvas-wrapper {
   flex: 1;
+  height: auto;
+  min-height: 0;
+  position: relative;
+}
+
+.dialog .chart-card canvas {
   max-height: none;
+}
+
+/* Recolteur detail : grille identite / KPIs */
+.recolteur-identity-grid {
+  display: grid;
+  grid-template-columns: 300px 1fr;
+  gap: 20px;
+  margin-bottom: 24px;
+}
+
+.recolteur-identity-grid .stats-grid {
+  grid-template-columns: repeat(3, 1fr);
+  align-content: start;
 }
 
 .dialog-close {
@@ -1453,6 +1539,46 @@ canvas {
 .dialog-download:disabled {
   opacity: 0.6;
   cursor: not-allowed;
+}
+
+.checkbox-label {
+  display: flex;
+  flex-direction: row !important;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  font-size: 14px;
+  user-select: none;
+  margin-bottom: 4px;
+}
+
+.checkbox-label input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+  margin: 0;
+  cursor: pointer;
+  accent-color: var(--primary, #2e7d32);
+}
+
+.form-fieldset {
+  border: 1px solid var(--border, #e0e0e0);
+  border-radius: var(--radius-sm, 6px);
+  padding: 10px 14px 12px;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+}
+
+.form-fieldset legend {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  color: #888;
+  letter-spacing: 0.5px;
+  padding: 0 4px;
 }
 
 .dialog-actions {
@@ -2238,7 +2364,8 @@ canvas {
   display: flex;
   gap: 6px;
   align-items: center;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
+  white-space: nowrap;
 }
 
 /* ── Aide sous les champs de formulaire ──────────────────────── */
@@ -2305,12 +2432,20 @@ canvas {
   /* ── Page header ── */
   .page-header-row {
     flex-direction: column;
-    align-items: flex-start;
+    align-items: center;
     gap: 8px;
   }
 
-  .page-header-row h2,
-  .page-header-row h3 {
+  .page-header > div:first-child,
+  .page-header-row > div:first-child {
+    text-align: center;
+    width: 100%;
+  }
+
+  .page-header-row > h2,
+  .page-header-row > h3 {
+    text-align: center;
+    width: 100%;
     margin: 0;
   }
 
@@ -2450,8 +2585,8 @@ canvas {
     font-size: 0.85rem;
   }
 
-  .chart-card canvas {
-    max-height: 180px !important;
+  .chart-card {
+    height: 250px;
   }
 
   /* Dialog graphique agrandi : laisser le canvas occuper l'espace dispo */
@@ -2461,6 +2596,10 @@ canvas {
 
   .dialog .chart-card canvas {
     max-height: none !important;
+  }
+
+  .recolteur-identity-grid {
+    grid-template-columns: 1fr;
   }
 
   /* ── Heatmap production ── */

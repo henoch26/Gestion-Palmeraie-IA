@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import ChartCard from "../../components/ChartCard.jsx";
 import ChartDialog from "../../components/ChartDialog.jsx";
 import LogoLoader from "../../components/LogoLoader.jsx";
+import { useAuth } from "../../context/AuthContext.jsx";
 import { useToast } from "../../context/ToastContext.jsx";
 import { getSecteurAnalytics } from "../../services/secteurService.js";
 import { getToken } from "../../services/authService.js";
@@ -25,6 +26,59 @@ function fmtDec(v, d = 2) {
   return v == null ? "—" : Number(v).toFixed(d);
 }
 
+function makeStackedPlugin(id, nBars) {
+  return {
+    id,
+    afterDatasetsDraw(chart) {
+      if (chart.width < 300) return;
+      const { ctx } = chart;
+      const datasets = chart.data.datasets;
+
+      datasets.forEach((dataset, di) => {
+        const meta = chart.getDatasetMeta(di);
+        if (meta.hidden) return;
+        meta.data.forEach((bar, i) => {
+          const value = Number(dataset.data[i]) || 0;
+          if (!value) return;
+          const { x, y, base } = bar.getProps(["x", "y", "base"], true);
+          const segH = Math.abs(base - y);
+          if (segH < 18) return;
+          ctx.save();
+          ctx.fillStyle = "#fff";
+          ctx.textAlign = "center";
+          ctx.textBaseline = "middle";
+          ctx.font = "bold 10px sans-serif";
+          ctx.shadowColor = "rgba(0,0,0,0.4)";
+          ctx.shadowBlur = 3;
+          ctx.fillText(fmtInt(value), x, (y + base) / 2);
+          ctx.restore();
+        });
+      });
+
+      for (let i = 0; i < nBars; i++) {
+        let total = 0;
+        let topY = Infinity;
+        datasets.forEach((ds, di) => {
+          const meta = chart.getDatasetMeta(di);
+          if (meta.hidden) return;
+          total += Number(ds.data[i]) || 0;
+          const { y } = meta.data[i].getProps(["y"], true);
+          if (y < topY) topY = y;
+        });
+        if (!total) continue;
+        const { x } = chart.getDatasetMeta(0).data[i].getProps(["x"], true);
+        ctx.save();
+        ctx.fillStyle = "#1f4e79";
+        ctx.textAlign = "center";
+        ctx.textBaseline = "bottom";
+        ctx.font = "bold 11px sans-serif";
+        ctx.fillText(fmtInt(total), x, topY - 4);
+        ctx.restore();
+      }
+    },
+  };
+}
+
 function KpiCard({ label, value, sub, color = C.green }) {
   return (
     <article className="stat-card" style={{ borderTop: `3px solid ${color}`, padding: "10px 12px" }}>
@@ -44,6 +98,12 @@ export default function DetailSecteur() {
   const { id } = useParams();
   const navigate = useNavigate();
   const { pushToast } = useToast();
+  const { user, isAdmin } = useAuth();
+  const [searchParams] = useSearchParams();
+
+  // Non-admin : filtre auto sur ses propres fiches
+  // Admin avec ?created_by=X en URL : filtre sur ce superviseur
+  const createdBy = !isAdmin ? (user?.id ?? null) : (searchParams.get("created_by") || null);
 
   const [year, setYear] = useState(new Date().getFullYear());
   const [data, setData] = useState(null);
@@ -58,7 +118,7 @@ export default function DetailSecteur() {
   const load = async () => {
     try {
       setLoading(true);
-      const d = await getSecteurAnalytics(id, year);
+      const d = await getSecteurAnalytics(id, year, createdBy);
       setData(d);
     } catch (err) {
       pushToast({ type: "error", title: "Secteur", message: err.message });
@@ -69,7 +129,7 @@ export default function DetailSecteur() {
 
   useEffect(() => {
     load();
-  }, [id, year]);
+  }, [id, year, createdBy]);
 
   const handleExport = async () => {
     try {
@@ -96,6 +156,8 @@ export default function DetailSecteur() {
     return `${d} ${MOIS[parseInt(m, 10) - 1]}`;
   };
 
+  const supNom = data?.filtre_superviseur?.actif ? data.filtre_superviseur.nom_complet : null;
+
   const monthlyChart = useMemo(() => {
     if (!data) return null;
     const today = new Date();
@@ -105,6 +167,7 @@ export default function DetailSecteur() {
     const monthlyLabelsPlugin = {
       id: "monthlyBarLabels",
       afterDatasetsDraw(chart) {
+        if (chart.width < 460) return;
         const { ctx } = chart;
         chart.data.datasets.forEach((dataset, di) => {
           const meta = chart.getDatasetMeta(di);
@@ -128,7 +191,7 @@ export default function DetailSecteur() {
     };
 
     return {
-      title: "Production mensuelle — comparaison 3 ans",
+      title: `Production mensuelle — ${data.secteur.code} / ${data.secteur.nom}${supNom ? ` · ${supNom}` : ""} (comparaison 3 ans)`,
       type: "bar",
       data: {
         labels: data.monthly.current.labels,
@@ -165,63 +228,35 @@ export default function DetailSecteur() {
     const fiches = data?.fiches_annee;
     if (!fiches?.length) return null;
     const sec = data.secteur;
+    const nBars = fiches.length;
 
-    const fichesLabelsPlugin = {
-      id: "fichesBarLabels",
-      afterDatasetsDraw(chart) {
-        const { ctx } = chart;
-        chart.data.datasets.forEach((dataset, di) => {
-          const meta = chart.getDatasetMeta(di);
-          if (meta.hidden) return;
-          meta.data.forEach((bar, i) => {
-            const value = Number(dataset.data[i]) || 0;
-            if (!value) return;
-            const { x, y } = bar.getProps(["x", "y"], true);
-            ctx.save();
-            ctx.translate(x, y - 4);
-            ctx.rotate(-Math.PI / 2);
-            ctx.fillStyle = "#333";
-            ctx.textAlign = "left";
-            ctx.textBaseline = "middle";
-            ctx.font = "bold 9px sans-serif";
-            ctx.fillText(fmtInt(value), 0, 0);
-            ctx.restore();
-          });
-        });
-      },
-    };
+    const fichesStackedPlugin = makeStackedPlugin("fichesStacked", nBars);
 
     return {
-      title: `Fiches de recolte — Secteur ${sec.code} / ${sec.nom} (${data.year})`,
+      title: `Fiches de recolte — Secteur ${sec.code} / ${sec.nom}${supNom ? ` · ${supNom}` : ""} (${data.year})`,
       type: "bar",
       data: {
         labels: fiches.map((f) => fmtFicheDate(f.date)),
-        datasets: [{
-          label: "Regimes recoltés",
-          data: fiches.map((f) => f.total_regimes),
-          backgroundColor: `${C.teal}bb`,
-        }],
+        datasets: [
+          { label: "Grands", data: fiches.map((f) => f.grands || 0), backgroundColor: `${C.green}cc`, stack: "regimes" },
+          { label: "Moyens", data: fiches.map((f) => f.moyens || 0), backgroundColor: `${C.blue}cc`,  stack: "regimes" },
+          { label: "Petits", data: fiches.map((f) => f.petits || 0), backgroundColor: `${C.amber}cc`, stack: "regimes" },
+        ],
       },
       options: {
         responsive: true, maintainAspectRatio: false,
-        layout: { padding: { top: 45 } },
+        layout: { padding: { top: 24 } },
         plugins: {
           legend: { position: "bottom" },
-          subtitle: {
-            display: true,
-            text: "en nombre de regimes",
-            color: "#999",
-            font: { size: 11, style: "italic" },
-            padding: { bottom: 6 },
-          },
+          subtitle: { display: true, text: "en nombre de regimes", color: "#999", font: { size: 11, style: "italic" }, padding: { bottom: 6 } },
           tooltip: { callbacks: { label: (ctx) => `${ctx.dataset.label} : ${fmtInt(ctx.parsed.y)} reg.` } },
         },
         scales: {
-          x: { grid: { display: false }, ticks: { maxRotation: 45, minRotation: 30 } },
-          y: { beginAtZero: true, ticks: { precision: 0 } },
+          x: { stacked: true, grid: { display: false }, ticks: { maxRotation: 45, minRotation: 30 } },
+          y: { stacked: true, beginAtZero: true, ticks: { precision: 0 } },
         },
       },
-      plugins: [fichesLabelsPlugin],
+      plugins: [fichesStackedPlugin],
     };
   }, [data]);
 
@@ -233,6 +268,7 @@ export default function DetailSecteur() {
     const yearlyStackedPlugin = {
       id: "yearlyStackedLabels",
       afterDatasetsDraw(chart) {
+        if (chart.width < 260) return;
         const { ctx } = chart;
         const datasets = chart.data.datasets;
 
@@ -283,7 +319,7 @@ export default function DetailSecteur() {
     };
 
     return {
-      title: `Production par annee (5 ans) — ${data.secteur.code}`,
+      title: `Production par annee (5 ans) — ${data.secteur.code}${supNom ? ` · ${supNom}` : ""}`,
       type: "bar",
       data: {
         labels: yearly.labels.map(String),
@@ -368,7 +404,7 @@ export default function DetailSecteur() {
 
     const sec = data.secteur;
     return {
-      title: `Secteur ${sec.code} — ${sec.nom} : repartition par type (${data.year})`,
+      title: `Secteur ${sec.code} — ${sec.nom}${supNom ? ` · ${supNom}` : ""} : repartition par type (${data.year})`,
       type: "doughnut",
       data: {
         labels: ["Grands", "Moyens", "Petits"],
@@ -395,14 +431,36 @@ export default function DetailSecteur() {
   }, [data]);
 
   const topRecolteursChart = useMemo(() => {
-    if (!data) return null;
+    const top = data?.top_recolteurs;
+    if (!top?.length) return null;
+    const sec = data.secteur;
+    const nBars = top.length;
+
     return {
-      title: "Top recolteurs (sur ce secteur)",
+      title: `Top 10 recolteurs — Secteur ${sec.code} / ${sec.nom}${supNom ? ` · ${supNom}` : ""} (${data.year})`,
       type: "bar",
       data: {
-        labels: (data.top_recolteurs || []).map((r) => r.nom),
-        datasets: [{ label: "Regimes", data: (data.top_recolteurs || []).map((r) => r.total), backgroundColor: "#42A5F5" }],
+        labels: top.map((r) => r.nom),
+        datasets: [
+          { label: "Grands", data: top.map((r) => r.grands || 0), backgroundColor: `${C.green}cc`, stack: "regimes" },
+          { label: "Moyens", data: top.map((r) => r.moyens || 0), backgroundColor: `${C.blue}cc`,  stack: "regimes" },
+          { label: "Petits", data: top.map((r) => r.petits || 0), backgroundColor: `${C.amber}cc`, stack: "regimes" },
+        ],
       },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        layout: { padding: { top: 24 } },
+        plugins: {
+          legend: { position: "bottom" },
+          subtitle: { display: true, text: "en nombre de regimes", color: "#999", font: { size: 11, style: "italic" }, padding: { bottom: 6 } },
+          tooltip: { callbacks: { label: (ctx) => `${ctx.dataset.label} : ${fmtInt(ctx.parsed.y)} reg.` } },
+        },
+        scales: {
+          x: { stacked: true, grid: { display: false }, ticks: { maxRotation: 30, minRotation: 20 } },
+          y: { stacked: true, beginAtZero: true, ticks: { precision: 0 } },
+        },
+      },
+      plugins: [makeStackedPlugin("topRecolteursStacked", nBars)],
     };
   }, [data]);
 
@@ -415,6 +473,11 @@ export default function DetailSecteur() {
           <h2 style={{ margin: 0 }}>
             Secteur {data?.secteur?.code ? `${data.secteur.code} — ${data.secteur.nom}` : `#${id}`}
           </h2>
+          {data?.filtre_superviseur?.actif && (
+            <p style={{ margin: "3px 0 0", fontSize: 13, color: "#1565c0", fontWeight: 600 }}>
+              Vue filtree : fiches de {data.filtre_superviseur.nom_complet}
+            </p>
+          )}
           {derniereRecolte && (
             <p style={{ margin: "3px 0 0", fontSize: 13, color: "#888" }}>
               Derniere recolte : {derniereRecolte}
@@ -443,17 +506,12 @@ export default function DetailSecteur() {
       ) : (
         <>
           <p style={GRP_LBL}>Informations</p>
-          <div style={G3}>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: 10, marginBottom: 4 }}>
             <KpiCard
               label="Superficie"
               value={`${data.secteur.superficie_ha} ha`}
               sub={data.secteur.rendement_cible_t_ha ? `Cible : ${data.secteur.rendement_cible_t_ha} t/ha` : undefined}
               color={C.teal}
-            />
-            <KpiCard
-              label="Nb palmiers"
-              value={data.secteur.nb_palmiers ? fmtInt(data.secteur.nb_palmiers) : "—"}
-              color={C.green}
             />
             <KpiCard
               label="Statut"
@@ -476,15 +534,18 @@ export default function DetailSecteur() {
             <KpiCard label="Petits" value={fmtInt(data.stats.regime_breakdown?.petits ?? 0)} color={C.amber} />
           </div>
 
-          <section className="charts-grid">
+          <section className="secteur-charts-row1">
             {monthlyChart && (
               <ChartCard {...monthlyChart} onClick={() => setActiveChart(monthlyChart)} />
             )}
-            {fichesChart && (
-              <ChartCard {...fichesChart} onClick={() => setActiveChart(fichesChart)} />
-            )}
             {yearlyChart && (
               <ChartCard {...yearlyChart} onClick={() => setActiveChart(yearlyChart)} />
+            )}
+          </section>
+
+          <section className="secteur-charts-row2">
+            {fichesChart && (
+              <ChartCard {...fichesChart} onClick={() => setActiveChart(fichesChart)} />
             )}
             {repartitionChart && (
               <ChartCard {...repartitionChart} onClick={() => setActiveChart(repartitionChart)} />

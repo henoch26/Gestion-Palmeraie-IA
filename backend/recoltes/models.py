@@ -34,6 +34,13 @@ class FicheRecolte(models.Model):
     statut = models.CharField(max_length=20, choices=STATUT_CHOICES, default="brouillon")
     date = models.DateField()
     superviseur_general = models.CharField(max_length=120, blank=True)
+    superviseur_general_obj = models.ForeignKey(
+        "agents.SuperviseurGeneral",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="fiches_supervisees",
+    )
     bareme_grands = models.PositiveIntegerField(default=60)
     bareme_moyens = models.PositiveIntegerField(default=50)
     bareme_petits = models.PositiveIntegerField(default=25)
@@ -150,25 +157,160 @@ class FicheRecolteDetail(models.Model):
 
 
 class FicheRecuVente(models.Model):
+    STATUT_CHOICES = [
+        ("brouillon", "Brouillon"),
+        ("valide",    "Validé"),
+    ]
     MODE_PAIEMENT_CHOICES = [
-        ("espece", "Espèce"),
+        ("espece",   "Espèce"),
         ("virement", "Virement"),
     ]
+
+    statut = models.CharField(max_length=20, choices=STATUT_CHOICES, default="brouillon")
+    validated_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True, blank=True,
+        related_name="recus_valides",
+    )
+    validated_at = models.DateTimeField(null=True, blank=True)
 
     fiche = models.ForeignKey(
         FicheRecolte, on_delete=models.CASCADE, related_name="recus"
     )
     date = models.DateField(null=True, blank=True)
     client = models.CharField(max_length=120, blank=True)
+    client_obj = models.ForeignKey(
+        "Client",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="recus",
+    )
     pesee_kg = models.DecimalField(max_digits=10, decimal_places=2, default=0)
     non_conformes_pct = models.DecimalField(max_digits=5, decimal_places=2, default=0)
     montant = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    prix_officiel = models.DecimalField(max_digits=12, decimal_places=2, null=True, blank=True)
     reference_facture = models.CharField(max_length=80, null=True, blank=True)
     mode_paiement = models.CharField(max_length=20, choices=MODE_PAIEMENT_CHOICES, null=True, blank=True)
     vehicule_transport = models.CharField(max_length=120, null=True, blank=True)
 
     class Meta:
         db_table = "recu_vente"
+        ordering = ["-date", "-id"]
 
     def __str__(self):
         return f"Recu {self.date} - {self.client}"
+
+    @property
+    def prix_calcule(self):
+        if self.pesee_kg and float(self.pesee_kg) > 0:
+            return round(float(self.montant) / float(self.pesee_kg), 2)
+        return None
+
+    @property
+    def rapport_prix(self):
+        pc = self.prix_calcule
+        if pc and self.prix_officiel and float(self.prix_officiel) > 0:
+            return round(pc / float(self.prix_officiel), 4)
+        return None
+
+
+class ParametreBonus(models.Model):
+    """Singleton : paramètres globaux (barème récolteurs + bonus non conformes)."""
+    # Barème par défaut pour les nouvelles fiches (FCFA par régime)
+    bareme_grands_defaut  = models.PositiveIntegerField(default=60)
+    bareme_moyens_defaut  = models.PositiveIntegerField(default=50)
+    bareme_petits_defaut  = models.PositiveIntegerField(default=25)
+    # Bonus qualité régimes non conformes
+    seuil_non_conformes = models.DecimalField(max_digits=5, decimal_places=2, default=5)
+    montant_bonus = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "parametre_bonus"
+
+    @classmethod
+    def get_instance(cls):
+        obj, _ = cls.objects.get_or_create(pk=1)
+        return obj
+
+    def __str__(self):
+        return f"Bonus seuil={self.seuil_non_conformes}% montant={self.montant_bonus}"
+
+
+class ActionLog(models.Model):
+    """Journal des actions effectuées sur les données (admin et superviseurs)."""
+    ACTION_CHOICES = [
+        # ── Actions admin ──────────────────────────────────────────
+        ("validation",              "Validation fiche"),
+        ("rejet",                   "Rejet fiche"),
+        ("modification_fiche",      "Modification fiche"),
+        ("modification_bareme",     "Modification barème"),
+        ("prix_officiel",           "Saisie/modif prix officiel"),
+        ("modification_recu",       "Modification reçu de vente"),
+        ("suppression_recu",        "Suppression reçu de vente"),
+        ("validation_recu",         "Validation reçu de vente"),
+        # ── Actions superviseur — fiches & récolteurs ──────────────
+        ("creation_fiche",          "Création fiche récolte"),
+        ("soumission_fiche",        "Soumission fiche récolte"),
+        ("suppression_fiche",       "Suppression fiche récolte"),
+        ("creation_recolteur",      "Création récolteur"),
+        ("modification_recolteur",  "Modification récolteur"),
+        ("suppression_recolteur",   "Suppression récolteur"),
+        # ── Actions sur les référentiels ───────────────────────────
+        ("creation_secteur",        "Création secteur"),
+        ("modification_secteur",    "Modification secteur"),
+        ("suppression_secteur",     "Suppression secteur"),
+        ("creation_agent",          "Création agent terrain"),
+        ("modification_agent",      "Modification agent terrain"),
+        ("suppression_agent",       "Suppression agent terrain"),
+        ("creation_materiel",       "Création matériel"),
+        ("modification_materiel",   "Modification matériel"),
+        ("suppression_materiel",    "Suppression matériel"),
+        # ── Fiches travaux ─────────────────────────────────────────
+        ("creation_travaux",        "Création fiche travaux"),
+        ("soumission_travaux",      "Soumission fiche travaux"),
+        ("suppression_travaux",     "Suppression fiche travaux"),
+        # ── Annulations admin ──────────────────────────────────────
+        ("annulation_action",       "Annulation d'action superviseur"),
+    ]
+
+    acteur = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        related_name="actions_effectuees",
+    )
+    superviseur = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="actions_subies",
+    )
+    action = models.CharField(max_length=40, choices=ACTION_CHOICES)
+    fiche = models.ForeignKey(
+        FicheRecolte,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="action_logs",
+    )
+    recu = models.ForeignKey(
+        FicheRecuVente,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="action_logs",
+    )
+    detail = models.TextField(blank=True)
+    timestamp = models.DateTimeField(auto_now_add=True)
+    annule = models.BooleanField(default=False)
+
+    class Meta:
+        db_table = "action_log"
+        ordering = ["-timestamp"]
+
+    def __str__(self):
+        return f"{self.acteur} — {self.action} — {self.timestamp:%Y-%m-%d %H:%M}"

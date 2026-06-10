@@ -20,7 +20,12 @@ export const getRecolteursStats = (year) =>
   apiGet(`${BASE}stats/${year ? `?year=${encodeURIComponent(year)}` : ""}`);
 export const getPersonnelStats = (year) =>
   apiGet(`${BASE}stats/${year ? `?year=${encodeURIComponent(year)}` : ""}`);
-export const getRecolteurAnalytics = (id, year) =>
-  apiGet(`${BASE}${id}/analytics/${year ? `?year=${encodeURIComponent(year)}` : ""}`);
-export const getPersonnelAnalytics = (id, year) =>
-  apiGet(`${BASE}${id}/analytics/${year ? `?year=${encodeURIComponent(year)}` : ""}`);
+export const getRecolteurAnalytics = (id, year, createdBy = null) => {
+  const params = new URLSearchParams();
+  if (year) params.set("year", year);
+  if (createdBy) params.set("created_by", createdBy);
+  const qs = params.toString();
+  return apiGet(`${BASE}${id}/analytics/${qs ? `?${qs}` : ""}`);
+};
+export const getPersonnelAnalytics = (id, year, createdBy = null) =>
+  getRecolteurAnalytics(id, year, createdBy);

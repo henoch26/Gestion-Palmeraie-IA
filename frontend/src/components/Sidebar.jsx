@@ -53,7 +53,8 @@ const SECTION_ROUTES = {
   travaux:    ["/travaux"],
   agents:     ["/agents"],
   ressources: ["/secteurs", "/recolteurs", "/materiels"],
-  admin:      ["/utilisateurs"],
+  admin:      ["/utilisateurs", "/clients", "/parametre-bonus", "/journal-audit"],
+  compte:     ["/profil", "/mon-audit"],
 };
 
 function initOpen(pathname) {
@@ -221,6 +222,7 @@ export default function Sidebar({ isNavigating = false }) {
             <TabLink pathname="/recoltes" tabKey="historique" label="Historique" defaultTab={isAdmin ? "historique" : "saisie"}
               badge={!isAdmin ? pendingCount : 0}
             />
+            <TabLink pathname="/recoltes" tabKey="ventes" label="Ventes" defaultTab={isAdmin ? "historique" : "saisie"} />
           </SidebarSection>
 
           {/* ── Travaux ── */}
@@ -253,10 +255,19 @@ export default function Sidebar({ isNavigating = false }) {
             </SidebarSection>
           )}
 
+          {/* ── Mon compte ── */}
+          <SidebarSection skey="compte" label="Mon compte" icon={IcoPerson} {...sp}>
+            <SidebarLink to="/profil" label="Mon profil" icon={IcoPerson} sub />
+            {!isAdmin && <SidebarLink to="/mon-audit" label="Mes actions" icon={IcoList} sub />}
+          </SidebarSection>
+
           {/* ── Administration (admin) ── */}
           {isAdmin && (
             <SidebarSection skey="admin" label="Administration" icon={IcoUsers} {...sp}>
               <SidebarLink to="/utilisateurs" label="Utilisateurs" icon={IcoUsers} sub />
+              <SidebarLink to="/clients" label="Clients" icon={IcoUsers} sub />
+              <SidebarLink to="/parametre-bonus" label="Parametres" icon={IcoCheck} sub />
+              <SidebarLink to="/journal-audit" label="Journal d'audit" icon={IcoList} sub />
             </SidebarSection>
           )}
 

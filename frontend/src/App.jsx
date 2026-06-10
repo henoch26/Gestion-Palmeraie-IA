@@ -11,7 +11,12 @@ import HistoriqueRecoltes from "./pages/recoltes/HistoriqueRecoltes.jsx";
 import HistoriqueTravaux from "./pages/travaux/HistoriqueTravaux.jsx";
 import ListeMateriels from "./pages/materiels/ListeMateriels.jsx";
 import GestionUtilisateurs from "./pages/admin/GestionUtilisateurs.jsx";
+import GestionClients from "./pages/admin/GestionClients.jsx";
+import ParametreBonus from "./pages/admin/ParametreBonus.jsx";
+import JournalAudit from "./pages/admin/JournalAudit.jsx";
+import MonAudit from "./pages/superviseur/MonAudit.jsx";
 import ListeAgents from "./pages/agents/ListeAgents.jsx";
+import DetailSuperviseur from "./pages/superviseurs/DetailSuperviseur.jsx";
 import LoginPage from "./pages/auth/LoginPage.jsx";
 import ChangePasswordPage from "./pages/auth/ChangePasswordPage.jsx";
 import MonProfilPage from "./pages/auth/MonProfilPage.jsx";
@@ -95,6 +100,7 @@ export default function App(){
               <Route path="/recoltes" element={<HistoriqueRecoltes />}/>
               <Route path="/travaux" element={<HistoriqueTravaux />}/>
               <Route path="/agents" element={<ListeAgents />}/>
+              <Route path="/superviseurs/:id" element={<DetailSuperviseur />}/>
 
               {/* Ressources — accessibles a l'admin ou aux superviseurs avec permission */}
               <Route path="/secteurs" element={<ListeSecteurs />}/>
@@ -103,9 +109,15 @@ export default function App(){
               <Route path="/recolteurs/:id" element={<DetailRecolteur />}/>
               <Route path="/materiels" element={<ListeMateriels />}/>
 
+              {/* Page audit superviseur (accessible à tous les connectés) */}
+              <Route path="/mon-audit" element={<MonAudit />}/>
+
               {/* Routes admin uniquement */}
               <Route element={<AdminRoute />}>
                 <Route path="/utilisateurs" element={<GestionUtilisateurs />}/>
+                <Route path="/clients" element={<GestionClients />}/>
+                <Route path="/parametre-bonus" element={<ParametreBonus />}/>
+                <Route path="/journal-audit" element={<JournalAudit />}/>
               </Route>
             </Route>
           </Route>

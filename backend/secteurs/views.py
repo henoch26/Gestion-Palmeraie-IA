@@ -1,7 +1,7 @@
 import io
 
 from django.http import HttpResponse
-from django.db.models import Sum, Max
+from django.db.models import Q, Sum, Max
 from django.db.models.functions import Coalesce
 from django.utils import timezone
 from openpyxl import Workbook
@@ -14,6 +14,20 @@ from .models import Secteur
 from .serializers import SecteurSerializer
 from recoltes.models import FicheRecolte, FicheRecolteDetail
 from recolteurs.models import Personnel
+from utils.audit import log_action, snapshot, diff_fields, build_revert_meta
+
+_SECTEUR_LABELS = {
+    "code":                "Code",
+    "nom":                 "Nom",
+    "superficie_ha":       "Superficie (ha)",
+    "situation_relief":    "Relief",
+    "type_sol":            "Type de sol",
+    "age_moyen_plants":    "Âge moyen plants (ans)",
+    "nb_palmiers":         "Nb palmiers",
+    "rendement_cible_t_ha":"Rendement cible (t/ha)",
+    "coordonnees_GPS":     "Coordonnées GPS",
+    "statut":              "Statut",
+}
 
 
 def _send_wb(wb, filename: str) -> HttpResponse:
@@ -38,6 +52,45 @@ def _style_header(ws, headers, fill_color="1F4E79"):
 
 class SecteurViewSet(viewsets.ModelViewSet):
     serializer_class = SecteurSerializer
+
+    def create(self, request, *args, **kwargs):
+        response = super().create(request, *args, **kwargs)
+        if response.status_code in (200, 201):
+            try:
+                inst = Secteur.objects.get(pk=response.data["id"])
+                snap = snapshot(inst, _SECTEUR_LABELS)
+            except Exception:
+                snap = {}
+            nom = f"{response.data.get('code', '')} — {response.data.get('nom', '')}".strip(" —")
+            log_action(request.user, "creation_secteur",
+                       detail=f"Secteur « {nom} » créé.",
+                       meta={"snapshot": snap})
+        return response
+
+    def update(self, request, *args, **kwargs):
+        instance = self.get_object()
+        pk = instance.pk
+        before = snapshot(instance, _SECTEUR_LABELS)
+        before_raw = build_revert_meta(instance, _SECTEUR_LABELS)
+        response = super().update(request, *args, **kwargs)
+        if response.status_code == 200:
+            fresh = Secteur.objects.get(pk=pk)
+            after = snapshot(fresh, _SECTEUR_LABELS)
+            changes = diff_fields(before, after)
+            nom = f"{fresh.code} — {fresh.nom}"
+            log_action(request.user, "modification_secteur",
+                       detail=f"Secteur « {nom} » modifié.",
+                       meta={"changes": changes, "object_id": pk, "object_type": "secteur", "before_raw": before_raw})
+        return response
+
+    def destroy(self, request, *args, **kwargs):
+        instance = self.get_object()
+        snap = snapshot(instance, _SECTEUR_LABELS)
+        nom = f"{instance.code} — {instance.nom}"
+        log_action(request.user, "suppression_secteur",
+                   detail=f"Secteur « {nom} » supprimé.",
+                   meta={"snapshot": snap})
+        return super().destroy(request, *args, **kwargs)
 
     def get_queryset(self):
         return (
@@ -87,16 +140,29 @@ class SecteurViewSet(viewsets.ModelViewSet):
 
     @action(detail=True, methods=["get"], url_path="analytics")
     def analytics(self, request, pk=None):
+        from django.contrib.auth.models import User as DjangoUser
         secteur = self.get_object()
         today = timezone.now().date()
         year = int(request.query_params.get("year", today.year))
         prev_year = year - 1
 
+        # Filtre optionnel par superviseur (created_by = User.pk)
+        created_by_id = request.query_params.get("created_by")
+        cb_user = None
+        if created_by_id:
+            try:
+                cb_user = DjangoUser.objects.get(pk=int(created_by_id))
+            except (ValueError, DjangoUser.DoesNotExist):
+                pass
+        detail_extra = {"ligne__fiche__created_by": cb_user} if cb_user else {}
+        fiche_extra  = {"created_by": cb_user} if cb_user else {}
+        pers_extra   = {"lignes_recolte__fiche__created_by": cb_user} if cb_user else {}
+
         month_labels = ["Jan", "Fev", "Mar", "Avr", "Mai", "Juin", "Juil", "Aout", "Sept", "Oct", "Nov", "Dec"]
 
         def monthly_totals(target_year):
             qs = (
-                FicheRecolteDetail.objects.filter(secteur=secteur, ligne__fiche__date__year=target_year)
+                FicheRecolteDetail.objects.filter(secteur=secteur, ligne__fiche__date__year=target_year, **detail_extra)
                 .values("ligne__fiche__date__month")
                 .annotate(total=Sum("quantite"))
             )
@@ -105,7 +171,7 @@ class SecteurViewSet(viewsets.ModelViewSet):
 
         start_year = year - 4
         yearly_qs = (
-            FicheRecolteDetail.objects.filter(secteur=secteur, ligne__fiche__date__year__gte=start_year)
+            FicheRecolteDetail.objects.filter(secteur=secteur, ligne__fiche__date__year__gte=start_year, **detail_extra)
             .values("ligne__fiche__date__year")
             .annotate(total=Sum("quantite"))
             .order_by("ligne__fiche__date__year")
@@ -114,7 +180,7 @@ class SecteurViewSet(viewsets.ModelViewSet):
         yearly_labels = list(range(start_year, year + 1))
 
         yearly_regime_qs = (
-            FicheRecolteDetail.objects.filter(secteur=secteur, ligne__fiche__date__year__gte=start_year)
+            FicheRecolteDetail.objects.filter(secteur=secteur, ligne__fiche__date__year__gte=start_year, **detail_extra)
             .values("ligne__fiche__date__year", "ligne__regime_type")
             .annotate(total=Sum("quantite"))
         )
@@ -131,14 +197,14 @@ class SecteurViewSet(viewsets.ModelViewSet):
                 petits_by_year[yr] = petits_by_year.get(yr, 0) + t
 
         total_year = (
-            FicheRecolteDetail.objects.filter(secteur=secteur, ligne__fiche__date__year=year)
+            FicheRecolteDetail.objects.filter(secteur=secteur, ligne__fiche__date__year=year, **detail_extra)
             .aggregate(total=Sum("quantite"))["total"] or 0
         )
         superficie = float(secteur.superficie_ha or 0)
         rendement_ha = round(float(total_year) / superficie, 4) if superficie else 0
 
         regime_qs = (
-            FicheRecolteDetail.objects.filter(secteur=secteur, ligne__fiche__date__year=year)
+            FicheRecolteDetail.objects.filter(secteur=secteur, ligne__fiche__date__year=year, **detail_extra)
             .values("ligne__regime_type")
             .annotate(total=Sum("quantite"))
         )
@@ -148,6 +214,7 @@ class SecteurViewSet(viewsets.ModelViewSet):
             Personnel.objects.filter(
                 lignes_recolte__details__secteur=secteur,
                 lignes_recolte__fiche__date__year=year,
+                **pers_extra,
             )
             .distinct()
             .count()
@@ -157,26 +224,40 @@ class SecteurViewSet(viewsets.ModelViewSet):
             Personnel.objects.filter(
                 lignes_recolte__details__secteur=secteur,
                 lignes_recolte__fiche__date__year=year,
+                **pers_extra,
             )
-            .annotate(total=Coalesce(Sum("lignes_recolte__details__quantite"), 0))
-            .values("id", "numero_telephone", "nom", "total")
+            .annotate(
+                total=Coalesce(Sum("lignes_recolte__details__quantite"), 0),
+                grands=Coalesce(Sum("lignes_recolte__details__quantite", filter=Q(lignes_recolte__regime_type="grands")), 0),
+                moyens=Coalesce(Sum("lignes_recolte__details__quantite", filter=Q(lignes_recolte__regime_type="moyens")), 0),
+                petits=Coalesce(Sum("lignes_recolte__details__quantite", filter=Q(lignes_recolte__regime_type="petits")), 0),
+            )
+            .values("id", "numero_telephone", "nom", "total", "grands", "moyens", "petits")
             .order_by("-total")[:10]
         )
 
         all_fiches = list(
-            FicheRecolte.objects.filter(lignes__details__secteur=secteur, date__year=year)
+            FicheRecolte.objects.filter(lignes__details__secteur=secteur, date__year=year, **fiche_extra)
             .order_by("date").distinct()
         )
         fiches_annee_rows = []
         for f in all_fiches:
-            qty = (
+            agg = (
                 FicheRecolteDetail.objects.filter(secteur=secteur, ligne__fiche=f)
-                .aggregate(total=Sum("quantite"))["total"] or 0
+                .aggregate(
+                    total=Sum("quantite"),
+                    grands=Sum("quantite", filter=Q(ligne__regime_type="grands")),
+                    moyens=Sum("quantite", filter=Q(ligne__regime_type="moyens")),
+                    petits=Sum("quantite", filter=Q(ligne__regime_type="petits")),
+                )
             )
             fiches_annee_rows.append({
                 "fiche_id": f.id,
                 "date": str(f.date),
-                "total_regimes": int(qty),
+                "total_regimes": int(agg["total"] or 0),
+                "grands": int(agg["grands"] or 0),
+                "moyens": int(agg["moyens"] or 0),
+                "petits": int(agg["petits"] or 0),
             })
         last_rows = list(reversed(fiches_annee_rows[-10:]))
 
@@ -187,6 +268,11 @@ class SecteurViewSet(viewsets.ModelViewSet):
                 "statut": secteur.statut,
                 "nb_palmiers": secteur.nb_palmiers,
                 "rendement_cible_t_ha": float(secteur.rendement_cible_t_ha) if secteur.rendement_cible_t_ha else None,
+            },
+            "filtre_superviseur": {
+                "actif": cb_user is not None,
+                "user_id": cb_user.id if cb_user else None,
+                "nom_complet": f"{cb_user.first_name} {cb_user.last_name}".strip() or cb_user.username if cb_user else None,
             },
             "year": year,
             "monthly": {

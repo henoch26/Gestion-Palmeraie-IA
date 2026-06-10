@@ -9,6 +9,7 @@ from rest_framework.decorators import action
 from rest_framework.response import Response
 
 from utils.permissions import IsAdmin
+from utils.audit import log_action
 from accounts.utils import create_notification
 from .models import FicheTravaux
 from .serializers import FicheTravauxSerializer
@@ -65,6 +66,21 @@ class FicheTravauxViewSet(viewsets.ModelViewSet):
     def perform_create(self, serializer):
         serializer.save(created_by=self.request.user)
 
+    def create(self, request, *args, **kwargs):
+        response = super().create(request, *args, **kwargs)
+        if response.status_code in (200, 201):
+            ref = response.data.get("periode_travaux") or f"#{response.data.get('id', '')}"
+            log_action(request.user, "creation_travaux",
+                       detail=f"Fiche travaux ({ref}) créée.")
+        return response
+
+    def destroy(self, request, *args, **kwargs):
+        instance = self.get_object()
+        ref = str(instance.periode_travaux) if instance.periode_travaux else f"#{instance.pk}"
+        log_action(request.user, "suppression_travaux",
+                   detail=f"Fiche travaux ({ref}) supprimée.")
+        return super().destroy(request, *args, **kwargs)
+
     def get_permissions(self):
         if self.action in ("export",):
             return [IsAdmin()]
@@ -88,8 +104,14 @@ class FicheTravauxViewSet(viewsets.ModelViewSet):
         if err:
             return err
         old_statut = instance.statut
+        new_statut = request.data.get("statut")
         response = super().partial_update(request, *args, **kwargs)
-        _notify_statut_travaux(instance, old_statut, request.data.get("statut"))
+        if response.status_code == 200 and new_statut and new_statut != old_statut:
+            ref = str(instance.periode_travaux) if instance.periode_travaux else f"#{instance.pk}"
+            if new_statut == "soumis":
+                log_action(request.user, "soumission_travaux",
+                           detail=f"Fiche travaux ({ref}) soumise pour validation.")
+        _notify_statut_travaux(instance, old_statut, new_statut)
         return response
 
     def update(self, request, *args, **kwargs):

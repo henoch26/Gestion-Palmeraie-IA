@@ -26,7 +26,7 @@ export default function FicheTravauxDialog({ open, onClose, fiche }) {
   const avancement = fiche.statut_avancement || "";
 
   return (
-    <div className="dialog-backdrop" onClick={onClose}>
+    <div className="dialog-backdrop">
       <div className="dialog fiche-dialog" onClick={(e) => e.stopPropagation()}>
         <button className="dialog-close" onClick={onClose}>Fermer</button>
 

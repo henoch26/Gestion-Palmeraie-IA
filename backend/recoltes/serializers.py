@@ -1,12 +1,14 @@
 from django.db import transaction
 from rest_framework import serializers
 from .models import (
+    ActionLog,
     Client,
     FicheRecolte,
     SuperviseurAdjoint,
     FicheRecolteLigne,
     FicheRecolteDetail,
     FicheRecuVente,
+    ParametreBonus,
 )
 
 
@@ -89,6 +91,41 @@ class FicheRecolteLigneSerializer(serializers.ModelSerializer):
 
 
 class FicheRecuVenteSerializer(serializers.ModelSerializer):
+    prix_calcule       = serializers.SerializerMethodField()
+    rapport_prix       = serializers.SerializerMethodField()
+    client_nom         = serializers.CharField(source="client_obj.nom", read_only=True, default=None)
+    fiche_date         = serializers.DateField(source="fiche.date", read_only=True)
+    fiche_superviseur  = serializers.CharField(source="fiche.superviseur_general", read_only=True)
+    statut_display     = serializers.CharField(source="get_statut_display", read_only=True)
+    validated_by_display = serializers.SerializerMethodField()
+
+    class Meta:
+        model = FicheRecuVente
+        fields = [
+            "id", "statut", "statut_display", "validated_by_display", "validated_at",
+            "fiche", "fiche_date", "fiche_superviseur",
+            "date", "client", "client_obj", "client_nom",
+            "pesee_kg", "non_conformes_pct", "montant",
+            "prix_officiel", "prix_calcule", "rapport_prix",
+            "reference_facture", "mode_paiement", "vehicule_transport",
+        ]
+        read_only_fields = [
+            "prix_calcule", "rapport_prix", "fiche_date", "fiche_superviseur", "client_nom",
+            "statut_display", "validated_by_display", "validated_at",
+        ]
+
+    def get_prix_calcule(self, obj):
+        return obj.prix_calcule
+
+    def get_rapport_prix(self, obj):
+        return obj.rapport_prix
+
+    def get_validated_by_display(self, obj):
+        if not obj.validated_by:
+            return None
+        u = obj.validated_by
+        return f"{u.first_name} {u.last_name}".strip() or u.username
+
     def validate(self, attrs):
         d = attrs.get("date")
         client = (attrs.get("client") or "").strip()
@@ -112,12 +149,17 @@ class FicheRecuVenteSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError({"montant": "Montant requis"})
         return attrs
 
+
+class ParametreBonusSerializer(serializers.ModelSerializer):
     class Meta:
-        model = FicheRecuVente
+        model = ParametreBonus
         fields = [
-            "id", "date", "client", "pesee_kg", "non_conformes_pct", "montant",
-            "reference_facture", "mode_paiement", "vehicule_transport",
+            "id",
+            "bareme_grands_defaut", "bareme_moyens_defaut", "bareme_petits_defaut",
+            "seuil_non_conformes", "montant_bonus",
+            "updated_at",
         ]
+        read_only_fields = ["id", "updated_at"]
 
 
 class FicheRecolteSerializer(serializers.ModelSerializer):
@@ -127,6 +169,7 @@ class FicheRecolteSerializer(serializers.ModelSerializer):
     created_by_username = serializers.CharField(source="created_by.username", read_only=True)
     statut_display = serializers.CharField(source="get_statut_display", read_only=True)
     validated_by_display = serializers.SerializerMethodField()
+    superviseur_general_display = serializers.SerializerMethodField()
 
     class Meta:
         model = FicheRecolte
@@ -139,14 +182,24 @@ class FicheRecolteSerializer(serializers.ModelSerializer):
         u = obj.validated_by
         return f"{u.first_name} {u.last_name}".strip() or u.username
 
+    def get_superviseur_general_display(self, obj):
+        if obj.superviseur_general_obj:
+            s = obj.superviseur_general_obj
+            return f"{s.nom} {s.prenom}".strip()
+        return obj.superviseur_general or None
+
     def validate(self, attrs):
         # Ces validations ne s'appliquent que si les champs sont présents dans la requête
         # (permet les PATCH partiels, ex: { statut: "valide" } sans re-soumettre toute la fiche)
-        if "superviseur_general" in attrs:
+        sup_obj = attrs.get("superviseur_general_obj")
+        if "superviseur_general" in attrs and not sup_obj:
             if not (attrs.get("superviseur_general") or "").strip():
                 raise serializers.ValidationError(
                     {"superviseur_general": "Superviseur general requis"}
                 )
+        # Auto-sync: si FK fournie, mettre à jour le champ texte
+        if sup_obj:
+            attrs["superviseur_general"] = f"{sup_obj.nom} {sup_obj.prenom}".strip()
 
         if "lignes" in attrs:
             lignes = attrs.get("lignes") or []
@@ -265,3 +318,42 @@ class FicheRecolteSerializer(serializers.ModelSerializer):
                     FicheRecuVente.objects.create(fiche=instance, **recu)
 
         return instance
+
+
+class ActionLogSerializer(serializers.ModelSerializer):
+    acteur_display      = serializers.SerializerMethodField()
+    superviseur_display = serializers.SerializerMethodField()
+    action_display      = serializers.CharField(source="get_action_display", read_only=True)
+    fiche_date          = serializers.DateField(source="fiche.date", read_only=True, default=None)
+    detail_parsed       = serializers.SerializerMethodField()
+
+    class Meta:
+        model = ActionLog
+        fields = [
+            "id", "timestamp", "action", "action_display",
+            "acteur_display", "superviseur_display",
+            "fiche", "fiche_date", "recu",
+            "detail", "detail_parsed", "annule",
+        ]
+
+    def get_acteur_display(self, obj):
+        if not obj.acteur:
+            return "—"
+        u = obj.acteur
+        return f"{u.first_name} {u.last_name}".strip() or u.username
+
+    def get_superviseur_display(self, obj):
+        if not obj.superviseur:
+            return "—"
+        u = obj.superviseur
+        return f"{u.first_name} {u.last_name}".strip() or u.username
+
+    def get_detail_parsed(self, obj):
+        import json
+        try:
+            data = json.loads(obj.detail)
+            if isinstance(data, dict):
+                return data
+        except (json.JSONDecodeError, TypeError):
+            pass
+        return {"label": obj.detail or ""}

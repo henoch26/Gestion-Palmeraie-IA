@@ -43,8 +43,7 @@ export default function ListeAgents() {
     return agents.filter((a) =>
       (a.nom_complet || "").toLowerCase().includes(q) ||
       (a.matricule   || "").toLowerCase().includes(q) ||
-      (a.telephone   || "").toLowerCase().includes(q) ||
-      (a.code        || "").toLowerCase().includes(q)
+      (a.telephone   || "").toLowerCase().includes(q)
     );
   }, [agents, search]);
 
@@ -81,7 +80,6 @@ export default function ListeAgents() {
   };
 
   const columns = [
-    { key: "code",        label: "Code" },
     {
       key: "nom_complet",
       label: "Nom complet",

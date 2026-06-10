@@ -14,6 +14,13 @@ from secteurs.models import Secteur
 from travaux.models import FicheTravaux, ConsommableTravaux, RepartitionTache
 
 
+def _is_admin(user):
+    try:
+        return user.profile.is_admin
+    except AttributeError:
+        return False
+
+
 @api_view(["GET"])
 def summary_view(request):
     today = date.today()
@@ -40,8 +47,23 @@ def summary_view(request):
     except Exception:
         pass
 
-    # ── Base querysets (filtrables) ──────────────────────────────────────────
+    # ── Base querysets ────────────────────────────────────────────────────────
+    # Superviseur : uniquement ses propres fiches ; admin : tout
+    user_is_admin = _is_admin(request.user)
+
     details_qs = FicheRecolteDetail.objects.all()
+    if not user_is_admin:
+        details_qs = details_qs.filter(ligne__fiche__created_by=request.user)
+
+    fiches_recolte_qs = FicheRecolte.objects.all()
+    if not user_is_admin:
+        fiches_recolte_qs = fiches_recolte_qs.filter(created_by=request.user)
+
+    travaux_qs = FicheTravaux.objects.all()
+    if not user_is_admin:
+        travaux_qs = travaux_qs.filter(created_by=request.user)
+
+    # Filtres optionnels (secteur / recolteur / regime)
     if secteur_obj:
         details_qs = details_qs.filter(secteur=secteur_obj)
     if recolteur_obj:
@@ -49,7 +71,6 @@ def summary_view(request):
     if regime_type:
         details_qs = details_qs.filter(ligne__regime_type=regime_type)
 
-    fiches_recolte_qs = FicheRecolte.objects.all()
     if secteur_obj:
         fiches_recolte_qs = fiches_recolte_qs.filter(lignes__details__secteur=secteur_obj)
     if recolteur_obj:
@@ -142,7 +163,6 @@ def summary_view(request):
         F("quantite") * F("prix_unitaire"),
         output_field=DecimalField(max_digits=20, decimal_places=2),
     )
-    travaux_qs = FicheTravaux.objects.all()
     if secteur_obj:
         travaux_qs = travaux_qs.filter(secteurs_couverts=secteur_obj)
     travaux_qs = travaux_qs.distinct()

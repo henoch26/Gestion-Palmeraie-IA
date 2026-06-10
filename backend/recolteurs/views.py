@@ -47,10 +47,59 @@ def _send_wb(wb, filename: str) -> HttpResponse:
     return response
 
 
+from utils.audit import log_action, snapshot as audit_snapshot, diff_fields, build_revert_meta
+
+_PERSONNEL_LABELS = {
+    "nom":              "Nom",
+    "lieu_residence":   "Lieu de résidence",
+    "numero_telephone": "Téléphone",
+    "whatsapp_actif":   "WhatsApp actif",
+    "est_wave":         "Wave",
+    "date_naissance":   "Date de naissance",
+}
+
+
 class PersonnelViewSet(viewsets.ModelViewSet):
     """CRUD complet pour le personnel (anciennement Recolteur)."""
     queryset = Personnel.objects.all().order_by("-id")
     serializer_class = PersonnelSerializer
+
+    def create(self, request, *args, **kwargs):
+        response = super().create(request, *args, **kwargs)
+        if response.status_code in (200, 201):
+            try:
+                inst = Personnel.objects.get(pk=response.data["id"])
+                snap = audit_snapshot(inst, _PERSONNEL_LABELS)
+            except Exception:
+                snap = {}
+            nom = response.data.get("nom", "")
+            log_action(request.user, "creation_recolteur",
+                       detail=f"Récolteur « {nom} » créé.",
+                       meta={"snapshot": snap})
+        return response
+
+    def partial_update(self, request, *args, **kwargs):
+        instance = self.get_object()
+        pk = instance.pk
+        before = audit_snapshot(instance, _PERSONNEL_LABELS)
+        before_raw = build_revert_meta(instance, _PERSONNEL_LABELS)
+        response = super().partial_update(request, *args, **kwargs)
+        if response.status_code == 200:
+            fresh = Personnel.objects.get(pk=pk)
+            after = audit_snapshot(fresh, _PERSONNEL_LABELS)
+            changes = diff_fields(before, after)
+            log_action(request.user, "modification_recolteur",
+                       detail=f"Récolteur « {fresh.nom} » modifié.",
+                       meta={"changes": changes, "object_id": pk, "object_type": "recolteur", "before_raw": before_raw})
+        return response
+
+    def destroy(self, request, *args, **kwargs):
+        instance = self.get_object()
+        snap = audit_snapshot(instance, _PERSONNEL_LABELS)
+        log_action(request.user, "suppression_recolteur",
+                   detail=f"Récolteur « {instance.nom} » supprimé.",
+                   meta={"snapshot": snap})
+        return super().destroy(request, *args, **kwargs)
 
     @action(detail=False, methods=["get"], url_path="stats")
     def stats(self, request):
@@ -84,17 +133,30 @@ class PersonnelViewSet(viewsets.ModelViewSet):
 
     @action(detail=True, methods=["get"], url_path="analytics")
     def analytics(self, request, pk=None):
+        from django.contrib.auth.models import User as DjangoUser
         personne = self.get_object()
         today = timezone.now().date()
         year = int(request.query_params.get("year", today.year))
         prev_year = year - 1
+
+        # Filtre optionnel par superviseur
+        created_by_id = request.query_params.get("created_by")
+        cb_user = None
+        if created_by_id:
+            try:
+                cb_user = DjangoUser.objects.get(pk=int(created_by_id))
+            except (ValueError, DjangoUser.DoesNotExist):
+                pass
+        detail_extra = {"ligne__fiche__created_by": cb_user} if cb_user else {}
+        fiche_extra  = {"created_by": cb_user} if cb_user else {}
+        ligne_extra  = {"fiche__created_by": cb_user} if cb_user else {}
 
         month_labels = ["Jan", "Fev", "Mar", "Avr", "Mai", "Juin", "Juil", "Aout", "Sept", "Oct", "Nov", "Dec"]
 
         def monthly_totals(target_year):
             qs = (
                 FicheRecolteDetail.objects.filter(
-                    ligne__recolteur=personne, ligne__fiche__date__year=target_year
+                    ligne__recolteur=personne, ligne__fiche__date__year=target_year, **detail_extra
                 )
                 .values("ligne__fiche__date__month")
                 .annotate(total=Sum("quantite"))
@@ -105,7 +167,7 @@ class PersonnelViewSet(viewsets.ModelViewSet):
         start_year = year - 4
         yearly_qs = (
             FicheRecolteDetail.objects.filter(
-                ligne__recolteur=personne, ligne__fiche__date__year__gte=start_year
+                ligne__recolteur=personne, ligne__fiche__date__year__gte=start_year, **detail_extra
             )
             .values("ligne__fiche__date__year")
             .annotate(total=Sum("quantite"))
@@ -114,31 +176,50 @@ class PersonnelViewSet(viewsets.ModelViewSet):
         yearly_map = {r["ligne__fiche__date__year"]: int(r["total"] or 0) for r in yearly_qs}
         yearly_labels = list(range(start_year, year + 1))
 
+        yearly_regime_qs = (
+            FicheRecolteDetail.objects.filter(
+                ligne__recolteur=personne, ligne__fiche__date__year__gte=start_year, **detail_extra
+            )
+            .values("ligne__fiche__date__year", "ligne__regime_type")
+            .annotate(total=Sum("quantite"))
+        )
+        grands_by_year, moyens_by_year, petits_by_year = {}, {}, {}
+        for r in yearly_regime_qs:
+            yr = r["ligne__fiche__date__year"]
+            t = int(r["total"] or 0)
+            rt = r["ligne__regime_type"]
+            if rt == "grands":
+                grands_by_year[yr] = grands_by_year.get(yr, 0) + t
+            elif rt == "moyens":
+                moyens_by_year[yr] = moyens_by_year.get(yr, 0) + t
+            elif rt == "petits":
+                petits_by_year[yr] = petits_by_year.get(yr, 0) + t
+
+        cb_q = Q(lignes_recolte__fiche__created_by=cb_user) if cb_user else Q()
         base = (
             Personnel.objects.filter(id=personne.id)
             .annotate(
                 grands=Coalesce(Sum("lignes_recolte__details__quantite",
-                                    filter=Q(lignes_recolte__fiche__date__year=year, lignes_recolte__regime_type="grands")), 0),
+                                    filter=Q(lignes_recolte__fiche__date__year=year, lignes_recolte__regime_type="grands") & cb_q), 0),
                 moyens=Coalesce(Sum("lignes_recolte__details__quantite",
-                                    filter=Q(lignes_recolte__fiche__date__year=year, lignes_recolte__regime_type="moyens")), 0),
+                                    filter=Q(lignes_recolte__fiche__date__year=year, lignes_recolte__regime_type="moyens") & cb_q), 0),
                 petits=Coalesce(Sum("lignes_recolte__details__quantite",
-                                    filter=Q(lignes_recolte__fiche__date__year=year, lignes_recolte__regime_type="petits")), 0),
+                                    filter=Q(lignes_recolte__fiche__date__year=year, lignes_recolte__regime_type="petits") & cb_q), 0),
                 total_regimes=Coalesce(Sum("lignes_recolte__details__quantite",
-                                           filter=Q(lignes_recolte__fiche__date__year=year)), 0),
+                                           filter=Q(lignes_recolte__fiche__date__year=year) & cb_q), 0),
             )
             .values("grands", "moyens", "petits", "total_regimes")
             .first() or {}
         )
 
-        # Salaire total de l'année
         salaire_total = float(
-            FicheRecolteLigne.objects.filter(recolteur=personne, fiche__date__year=year)
+            FicheRecolteLigne.objects.filter(recolteur=personne, fiche__date__year=year, **ligne_extra)
             .aggregate(t=Coalesce(Sum("salaire_calcule"), Decimal("0")))["t"] or 0
         )
 
-        # Rang parmi tous les recolteurs sur l'annee
+        # Rang : si filtre superviseur actif, rang parmi ses propres recolteurs ; sinon global
         all_totals = (
-            FicheRecolteDetail.objects.filter(ligne__fiche__date__year=year)
+            FicheRecolteDetail.objects.filter(ligne__fiche__date__year=year, **detail_extra)
             .exclude(ligne__recolteur__isnull=True)
             .values("ligne__recolteur")
             .annotate(total=Sum("quantite"))
@@ -147,23 +228,22 @@ class PersonnelViewSet(viewsets.ModelViewSet):
         rang = next((i + 1 for i, r in enumerate(all_totals) if r["ligne__recolteur"] == personne.id), None)
         nb_recolteurs_actifs = all_totals.count()
 
-        # Secteurs travailles cette annee
         secteurs_qs = (
             FicheRecolteDetail.objects.filter(
-                ligne__recolteur=personne, ligne__fiche__date__year=year
+                ligne__recolteur=personne, ligne__fiche__date__year=year, **detail_extra
             )
             .exclude(secteur__isnull=True)
-            .values("secteur__code", "secteur__nom")
+            .values("secteur__id", "secteur__code", "secteur__nom")
             .annotate(total=Sum("quantite"))
             .order_by("-total")
         )
         secteurs = [
-            {"code": r["secteur__code"], "nom": r["secteur__nom"], "total_regimes": int(r["total"] or 0)}
+            {"id": r["secteur__id"], "code": r["secteur__code"], "nom": r["secteur__nom"], "total_regimes": int(r["total"] or 0)}
             for r in secteurs_qs
         ]
 
         fiches = (
-            FicheRecolte.objects.filter(lignes__recolteur=personne, date__year=year)
+            FicheRecolte.objects.filter(lignes__recolteur=personne, date__year=year, **fiche_extra)
             .prefetch_related(
                 Prefetch("lignes",
                          queryset=FicheRecolteLigne.objects.filter(recolteur=personne).prefetch_related("details"))
@@ -201,9 +281,20 @@ class PersonnelViewSet(viewsets.ModelViewSet):
                 "est_wave": personne.est_wave,
                 "date_naissance": str(personne.date_naissance) if personne.date_naissance else None,
             },
+            "filtre_superviseur": {
+                "actif": cb_user is not None,
+                "user_id": cb_user.id if cb_user else None,
+                "nom_complet": f"{cb_user.first_name} {cb_user.last_name}".strip() or cb_user.username if cb_user else None,
+            },
             "year": year,
             "monthly": {"current": monthly_totals(year), "previous": monthly_totals(prev_year)},
-            "yearly": {"labels": yearly_labels, "data": [yearly_map.get(y, 0) for y in yearly_labels]},
+            "yearly": {
+                "labels": yearly_labels,
+                "data":   [yearly_map.get(y, 0)       for y in yearly_labels],
+                "grands": [grands_by_year.get(y, 0)   for y in yearly_labels],
+                "moyens": [moyens_by_year.get(y, 0)   for y in yearly_labels],
+                "petits": [petits_by_year.get(y, 0)   for y in yearly_labels],
+            },
             "stats": {**base, "salaire_total": salaire_total},
             "rang": rang,
             "nb_recolteurs_actifs": nb_recolteurs_actifs,

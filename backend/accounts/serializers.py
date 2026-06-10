@@ -2,6 +2,7 @@ from django.contrib.auth.models import User
 from rest_framework import serializers
 
 from .models import UserProfile, AuditLog, Droit
+from agents.models import SuperviseurGeneral
 
 
 class DroitSerializer(serializers.ModelSerializer):
@@ -16,13 +17,15 @@ class UserListSerializer(serializers.ModelSerializer):
     must_change_password = serializers.BooleanField(source="profile.must_change_password", read_only=True)
     numero_telephone = serializers.CharField(source="profile.numero_telephone", read_only=True)
     permissions = serializers.SerializerMethodField()
+    superviseur_code = serializers.SerializerMethodField()
+    superviseur_id   = serializers.SerializerMethodField()
 
     class Meta:
         model = User
         fields = [
             "id", "username", "email", "first_name", "last_name",
             "is_active", "role", "role_display", "must_change_password",
-            "numero_telephone", "permissions",
+            "numero_telephone", "permissions", "superviseur_code", "superviseur_id",
         ]
 
     def get_permissions(self, obj):
@@ -30,6 +33,18 @@ class UserListSerializer(serializers.ModelSerializer):
             return list(obj.profile.droits.values_list("code", flat=True))
         except Exception:
             return []
+
+    def get_superviseur_code(self, obj):
+        try:
+            return obj.superviseur_profile.code
+        except Exception:
+            return ""
+
+    def get_superviseur_id(self, obj):
+        try:
+            return obj.superviseur_profile.id
+        except Exception:
+            return None
 
 
 class CreateUserSerializer(serializers.Serializer):
@@ -57,6 +72,14 @@ class CreateUserSerializer(serializers.Serializer):
             must_change_password=True,
             numero_telephone=numero_telephone,
         )
+        if role == UserProfile.ROLE_SUPERVISEUR:
+            SuperviseurGeneral.objects.create(
+                user=user,
+                nom=validated_data.get("last_name", "") or user.username,
+                prenom=validated_data.get("first_name", ""),
+                telephone=numero_telephone,
+                actif=True,
+            )
         return user
 
 
@@ -102,6 +125,20 @@ class UpdateUserSerializer(serializers.Serializer):
             if numero_telephone is not None:
                 profile.numero_telephone = numero_telephone
             profile.save()
+
+        # Sync profil SuperviseurGeneral si le compte est superviseur
+        effective_role = role or getattr(getattr(instance, "profile", None), "role", None)
+        if effective_role == UserProfile.ROLE_SUPERVISEUR:
+            sup, _ = SuperviseurGeneral.objects.get_or_create(user=instance, defaults={
+                "nom": instance.last_name or instance.username,
+                "prenom": instance.first_name,
+            })
+            sup.nom = instance.last_name or sup.nom
+            sup.prenom = instance.first_name or sup.prenom
+            if numero_telephone is not None:
+                sup.telephone = numero_telephone
+            sup.actif = instance.is_active
+            sup.save()
 
         return instance
 

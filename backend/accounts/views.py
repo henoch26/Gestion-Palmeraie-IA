@@ -193,6 +193,25 @@ def users_detail(request, pk):
             if request.data.get("role") == UserProfile.ROLE_SUPERVISEUR:
                 return Response({"detail": "Impossible de rétrograder votre propre rôle"}, status=400)
 
+        # Champs personnels que l'admin ne peut pas modifier si l'utilisateur a pris possession de son compte
+        PERSONAL_FIELDS = {"first_name", "last_name", "email", "numero_telephone"}
+        user_profile = getattr(user, "profile", None)
+        account_owned = user_profile and not user_profile.must_change_password
+
+        # Réinitialisation de mot de passe : autorisée uniquement si must_change_password=True est explicitement envoyé
+        is_password_reset = bool(request.data.get("password")) and request.data.get("must_change_password") is True
+
+        if account_owned and not is_password_reset:
+            blocked = PERSONAL_FIELDS & set(request.data.keys())
+            # Bloquer aussi le changement de mot de passe seul (sans reset flag)
+            if "password" in request.data:
+                blocked.add("password")
+            if blocked:
+                return Response(
+                    {"detail": f"Ce compte est géré par son titulaire. L'administrateur ne peut pas modifier : {', '.join(sorted(blocked))}."},
+                    status=403,
+                )
+
         # Mise à jour des permissions (si présentes dans la requête)
         if "permissions" in request.data:
             codes = request.data.get("permissions") or []
@@ -204,6 +223,11 @@ def users_detail(request, pk):
         serializer.is_valid(raise_exception=True)
         serializer.update(user, serializer.validated_data)
         user.refresh_from_db()
+
+        # Réinitialisation par l'admin : invalider le token pour forcer la reconnexion
+        if is_password_reset:
+            Token.objects.filter(user=user).delete()
+
         return Response(UserListSerializer(user).data)
 
     if request.method == "DELETE":

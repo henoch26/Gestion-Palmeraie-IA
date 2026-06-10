@@ -13,8 +13,14 @@ from rest_framework.response import Response
 from recolteurs.models import Personnel
 from utils.permissions import IsAdmin
 from accounts.utils import create_notification
-from .models import Client, FicheRecolte, FicheRecolteDetail
-from .serializers import ClientSerializer, FicheRecolteSerializer
+from .models import ActionLog, Client, FicheRecolte, FicheRecolteDetail, FicheRecuVente, ParametreBonus
+from .serializers import (
+    ActionLogSerializer,
+    ClientSerializer,
+    FicheRecolteSerializer,
+    FicheRecuVenteSerializer,
+    ParametreBonusSerializer,
+)
 
 
 class ClientViewSet(viewsets.ModelViewSet):
@@ -64,6 +70,26 @@ def _is_superviseur(user):
         return False
 
 
+def _log_action(acteur, action, fiche=None, recu=None, detail=""):
+    """Enregistre une action dans le journal de traçabilité."""
+    superviseur = None
+    if fiche and fiche.created_by:
+        superviseur = fiche.created_by
+    elif recu and recu.fiche and recu.fiche.created_by:
+        superviseur = recu.fiche.created_by
+    # Quand le superviseur agit sur ses propres données, il est à la fois acteur et superviseur
+    if superviseur is None and acteur and _is_superviseur(acteur):
+        superviseur = acteur
+    ActionLog.objects.create(
+        acteur=acteur,
+        superviseur=superviseur,
+        action=action,
+        fiche=fiche,
+        recu=recu,
+        detail=detail,
+    )
+
+
 def _notify_statut_recolte(instance, old_statut, new_statut, actor=None):
     if not new_statut or new_statut == old_statut:
         return
@@ -107,8 +133,8 @@ class FicheRecolteViewSet(viewsets.ModelViewSet):
         qs = FicheRecolte.objects.prefetch_related(
             "superviseurs_adjoints", "lignes__details", "recus"
         ).order_by("-id")
-        # Admin et superviseur voient toutes les fiches ; les autres uniquement les leurs
-        if not _is_admin(self.request.user) and not _is_superviseur(self.request.user):
+        # Admin voit toutes les fiches ; superviseur uniquement les siennes
+        if not _is_admin(self.request.user):
             qs = qs.filter(created_by=self.request.user)
         return qs
 
@@ -121,7 +147,20 @@ class FicheRecolteViewSet(viewsets.ModelViewSet):
                 {"detail": "Les administrateurs ne peuvent pas créer de fiches de récolte. Cette action est réservée aux superviseurs."},
                 status=403,
             )
-        return super().create(request, *args, **kwargs)
+        response = super().create(request, *args, **kwargs)
+        if response.status_code in (200, 201):
+            fiche_id = response.data.get("id")
+            date_str = response.data.get("date", f"#{fiche_id}")
+            _log_action(request.user, "creation_fiche",
+                        detail=f"Fiche du {date_str} créée.")
+        return response
+
+    def destroy(self, request, *args, **kwargs):
+        instance = self.get_object()
+        date_str = str(instance.date) if instance.date else f"#{instance.pk}"
+        _log_action(request.user, "suppression_fiche",
+                    detail=f"Fiche du {date_str} supprimée.")
+        return super().destroy(request, *args, **kwargs)
 
     def get_permissions(self):
         if self.action in ("export",):
@@ -153,6 +192,42 @@ class FicheRecolteViewSet(viewsets.ModelViewSet):
             instance._audit_motif = request.data.get("motif", "")
         return None
 
+    def _log_fiche_action(self, request, instance, old_statut, new_statut, data):
+        """Détermine et enregistre l'action dans le journal."""
+        is_admin = _is_admin(request.user)
+        is_sup   = _is_superviseur(request.user)
+
+        # ── Transitions de statut ──────────────────────────────────────────────
+        if new_statut and new_statut != old_statut:
+            if new_statut == "valide":
+                _log_action(request.user, "validation", fiche=instance,
+                            detail=f"Fiche du {instance.date} validée.")
+            elif new_statut == "soumis" and is_sup:
+                _log_action(request.user, "soumission_fiche", fiche=instance,
+                            detail=f"Fiche du {instance.date} soumise pour validation.")
+            elif new_statut == "brouillon" and old_statut == "soumis" and is_admin:
+                motif = data.get("motif", "")
+                _log_action(request.user, "rejet", fiche=instance,
+                            detail=f"Fiche du {instance.date} rejetée. Motif : {motif}")
+            return
+
+        if not is_admin:
+            return
+
+        # ── Actions admin uniquement ───────────────────────────────────────────
+        bareme_keys = {"bareme_grands", "bareme_moyens", "bareme_petits"}
+        changed_bareme = bareme_keys & set(data.keys())
+        if changed_bareme:
+            details = []
+            for k in sorted(changed_bareme):
+                old = getattr(instance, k, "?")
+                details.append(f"{k} : {old} → {data[k]}")
+            _log_action(request.user, "modification_bareme", fiche=instance,
+                        detail="Barème modifié. " + " | ".join(details))
+            return
+        _log_action(request.user, "modification_fiche", fiche=instance,
+                    detail=f"Fiche du {instance.date} modifiée par l'admin.")
+
     def partial_update(self, request, *args, **kwargs):
         instance = self.get_object()
         err = self._check_statut_transition(request, instance)
@@ -160,7 +235,11 @@ class FicheRecolteViewSet(viewsets.ModelViewSet):
             return err
         old_statut = instance.statut
         new_statut = request.data.get("statut")
-        response = super().partial_update(request, *args, **kwargs)
+        self._log_fiche_action(request, instance, old_statut, new_statut, request.data)
+        # Appel direct à super().update() avec partial=True pour éviter que
+        # DRF's partial_update() rebondisse sur self.update() et double le log.
+        kwargs["partial"] = True
+        response = super().update(request, *args, **kwargs)
         if new_statut == "valide" and old_statut != "valide":
             instance.refresh_from_db()
             instance.validated_by = request.user
@@ -176,6 +255,7 @@ class FicheRecolteViewSet(viewsets.ModelViewSet):
             return err
         old_statut = instance.statut
         new_statut = request.data.get("statut")
+        self._log_fiche_action(request, instance, old_statut, new_statut, request.data)
         response = super().update(request, *args, **kwargs)
         if new_statut == "valide" and old_statut != "valide":
             instance.refresh_from_db()
@@ -190,50 +270,86 @@ class FicheRecolteViewSet(viewsets.ModelViewSet):
         today = timezone.now().date()
         year = int(request.query_params.get("year", today.year))
         prev_year = year - 1
+        prev2_year = year - 2
+        is_admin = _is_admin(request.user)
+
+        # Filtre de base : superviseur ne voit que ses propres fiches
+        user_filter = Q() if is_admin else Q(ligne__fiche__created_by=request.user)
+        personnel_user_filter = Q() if is_admin else Q(lignes_recolte__fiche__created_by=request.user)
+
+        LABELS_MOIS = ["Jan", "Fev", "Mar", "Avr", "Mai", "Juin", "Juil", "Aout", "Sept", "Oct", "Nov", "Dec"]
 
         def monthly_totals(target_year):
             qs = (
-                FicheRecolteDetail.objects.filter(ligne__fiche__date__year=target_year)
-                .values("ligne__fiche__date__month")
+                FicheRecolteDetail.objects.filter(user_filter, ligne__fiche__date__year=target_year)
+                .values("ligne__fiche__date__month", "ligne__regime_type")
                 .annotate(total=Sum("quantite"))
             )
-            by_month = {r["ligne__fiche__date__month"]: r["total"] or 0 for r in qs}
-            labels = ["Jan", "Fev", "Mar", "Avr", "Mai", "Juin", "Juil", "Aout", "Sept", "Oct", "Nov", "Dec"]
-            return {"labels": labels, "data": [int(by_month.get(m, 0)) for m in range(1, 13)]}
+            by_month = {}
+            for r in qs:
+                m = r["ligne__fiche__date__month"]
+                t = r["ligne__regime_type"]
+                by_month.setdefault(m, {})[t] = int(r["total"] or 0)
+            return {
+                "labels": LABELS_MOIS,
+                "grands": [by_month.get(m, {}).get("grands", 0) for m in range(1, 13)],
+                "moyens": [by_month.get(m, {}).get("moyens", 0) for m in range(1, 13)],
+                "petits": [by_month.get(m, {}).get("petits", 0) for m in range(1, 13)],
+            }
 
         start_year = year - 4
         yearly_qs = (
-            FicheRecolteDetail.objects.filter(ligne__fiche__date__year__gte=start_year)
-            .values("ligne__fiche__date__year")
+            FicheRecolteDetail.objects.filter(user_filter, ligne__fiche__date__year__gte=start_year)
+            .values("ligne__fiche__date__year", "ligne__regime_type")
             .annotate(total=Sum("quantite"))
             .order_by("ligne__fiche__date__year")
         )
-        yearly_map = {r["ligne__fiche__date__year"]: r["total"] or 0 for r in yearly_qs}
+        yearly_map = {}
+        for r in yearly_qs:
+            y_ = r["ligne__fiche__date__year"]
+            t = r["ligne__regime_type"]
+            yearly_map.setdefault(y_, {})[t] = int(r["total"] or 0)
         yearly_labels = list(range(start_year, year + 1))
+        yearly = {
+            "labels": yearly_labels,
+            "grands": [yearly_map.get(y_, {}).get("grands", 0) for y_ in yearly_labels],
+            "moyens": [yearly_map.get(y_, {}).get("moyens", 0) for y_ in yearly_labels],
+            "petits": [yearly_map.get(y_, {}).get("petits", 0) for y_ in yearly_labels],
+        }
 
+        year_q = Q(lignes_recolte__fiche__date__year=year) & personnel_user_filter
         personnel = (
             Personnel.objects.annotate(
                 grands=Coalesce(Sum("lignes_recolte__details__quantite",
-                                    filter=Q(lignes_recolte__fiche__date__year=year, lignes_recolte__regime_type="grands")), 0),
+                                    filter=year_q & Q(lignes_recolte__regime_type="grands")), 0),
                 moyens=Coalesce(Sum("lignes_recolte__details__quantite",
-                                    filter=Q(lignes_recolte__fiche__date__year=year, lignes_recolte__regime_type="moyens")), 0),
+                                    filter=year_q & Q(lignes_recolte__regime_type="moyens")), 0),
                 petits=Coalesce(Sum("lignes_recolte__details__quantite",
-                                    filter=Q(lignes_recolte__fiche__date__year=year, lignes_recolte__regime_type="petits")), 0),
+                                    filter=year_q & Q(lignes_recolte__regime_type="petits")), 0),
                 total_regimes=Coalesce(Sum("lignes_recolte__details__quantite",
-                                           filter=Q(lignes_recolte__fiche__date__year=year)), 0),
-                fiches_count=Count("lignes_recolte__fiche", distinct=True,
-                                   filter=Q(lignes_recolte__fiche__date__year=year)),
-                last_recolte=Max("lignes_recolte__fiche__date", filter=Q(lignes_recolte__fiche__date__year=year)),
+                                           filter=year_q), 0),
+                fiches_count=Count("lignes_recolte__fiche", distinct=True, filter=year_q),
+                last_recolte=Max("lignes_recolte__fiche__date", filter=year_q),
             )
-            .values("id", "code", "numero_telephone", "nom", "lieu_residence",
+            .values("id", "numero_telephone", "nom", "lieu_residence",
                     "grands", "moyens", "petits", "total_regimes", "fiches_count", "last_recolte")
             .order_by("-total_regimes", "nom")
         )
+        # Pour un superviseur : n'afficher que les récolteurs qui ont participé à ses fiches
+        if not is_admin:
+            personnel = personnel.filter(
+                lignes_recolte__fiche__created_by=request.user,
+                lignes_recolte__fiche__date__year=year,
+            ).distinct()
 
         return Response({
             "year": year,
-            "monthly": {"current": monthly_totals(year), "previous": monthly_totals(prev_year)},
-            "yearly": {"labels": yearly_labels, "data": [int(yearly_map.get(y, 0)) for y in yearly_labels]},
+            "monthly": {
+                "current":  monthly_totals(year),
+                "previous": monthly_totals(prev_year),
+                "prev2":    monthly_totals(prev2_year),
+            },
+            "yearly": yearly,
             "recolteurs": list(personnel),
         })
 
@@ -243,8 +359,11 @@ class FicheRecolteViewSet(viewsets.ModelViewSet):
         if not date_str:
             return Response({"detail": "Paramètre 'date' requis."}, status=400)
 
-        fiches = FicheRecolte.objects.filter(date=date_str).prefetch_related(
-            "lignes__recolteur", "lignes__details__secteur"
+        qs = FicheRecolte.objects.filter(date=date_str)
+        if not _is_admin(request.user):
+            qs = qs.filter(created_by=request.user)
+        fiches = qs.prefetch_related(
+            "lignes__recolteur", "lignes__details__secteur", "superviseurs_adjoints"
         ).order_by("id")
 
         result = []
@@ -270,11 +389,17 @@ class FicheRecolteViewSet(viewsets.ModelViewSet):
             moyens = sum(l["total"] for l in lignes_data if l["regime_type"] == "moyens")
             petits = sum(l["total"] for l in lignes_data if l["regime_type"] == "petits")
 
+            adjoints = [
+                {"nom": s.nom, "secteur_ou_recolteur": s.secteur_ou_recolteur}
+                for s in fiche.superviseurs_adjoints.all()
+            ]
+
             result.append({
                 "id": fiche.id,
                 "date": str(fiche.date),
                 "statut": fiche.statut,
                 "superviseur_general": fiche.superviseur_general or "—",
+                "superviseurs_adjoints": adjoints,
                 "total_regimes": grands + moyens + petits,
                 "grands": grands,
                 "moyens": moyens,
@@ -328,3 +453,282 @@ class FicheRecolteViewSet(viewsets.ModelViewSet):
         ws.cell(row=total_row, column=6, value=total_qty).font = Font(bold=True)
 
         return _send_wb(wb, f"recoltes_export_{year}.xlsx")
+
+
+class FicheRecuVenteViewSet(viewsets.ModelViewSet):
+    """
+    CRUD standalone sur les reçus de vente.
+    - Superviseur : voit et gère uniquement les reçus de ses propres fiches.
+    - Admin : voit tout, peut modifier prix_officiel, valider/modifier les reçus validés.
+    """
+    serializer_class = FicheRecuVenteSerializer
+
+    def get_queryset(self):
+        qs = FicheRecuVente.objects.select_related(
+            "fiche", "client_obj", "validated_by"
+        ).order_by("-date", "-id")
+        if not _is_admin(self.request.user):
+            qs = qs.filter(fiche__created_by=self.request.user)
+
+        fiche_id = self.request.query_params.get("fiche")
+        if fiche_id:
+            qs = qs.filter(fiche_id=fiche_id)
+        year = self.request.query_params.get("year")
+        if year:
+            qs = qs.filter(date__year=year)
+
+        # Filtres de recherche
+        search = self.request.query_params.get("search", "").strip()
+        if search:
+            qs = qs.filter(
+                Q(client__icontains=search)
+                | Q(client_obj__nom__icontains=search)
+                | Q(reference_facture__icontains=search)
+            )
+        statut = self.request.query_params.get("statut")
+        if statut:
+            qs = qs.filter(statut=statut)
+        return qs
+
+    def perform_create(self, serializer):
+        fiche = serializer.validated_data.get("fiche")
+        if fiche and not _is_admin(self.request.user):
+            if fiche.created_by != self.request.user:
+                from rest_framework.exceptions import PermissionDenied
+                raise PermissionDenied("Vous ne pouvez créer un reçu que pour vos propres fiches.")
+        serializer.save()
+
+    def _check_recu_editable(self, request, instance):
+        """Retourne une Response d'erreur si le reçu ne peut pas être modifié par cet utilisateur."""
+        if instance.statut == "valide" and not _is_admin(request.user):
+            from rest_framework.exceptions import PermissionDenied
+            raise PermissionDenied("Ce reçu est validé. Seul l'administrateur peut le modifier.")
+
+    def partial_update(self, request, *args, **kwargs):
+        instance = self.get_object()
+        self._check_recu_editable(request, instance)
+        if not _is_admin(request.user) and "prix_officiel" in request.data:
+            from rest_framework.exceptions import PermissionDenied
+            raise PermissionDenied("Seul l'administrateur peut modifier le prix officiel.")
+        # Logging admin
+        if _is_admin(request.user):
+            if "prix_officiel" in request.data:
+                old_val = instance.prix_officiel or "—"
+                new_val = request.data["prix_officiel"]
+                _log_action(request.user, "prix_officiel", fiche=instance.fiche, recu=instance,
+                            detail=f"Prix officiel : {old_val} → {new_val} FCFA/kg (reçu #{instance.id}, fiche du {instance.fiche.date if instance.fiche else '?'})")
+            else:
+                _log_action(request.user, "modification_recu", fiche=instance.fiche, recu=instance,
+                            detail=f"Reçu #{instance.id} modifié (fiche du {instance.fiche.date if instance.fiche else '?'}).")
+        return super().partial_update(request, *args, **kwargs)
+
+    def destroy(self, request, *args, **kwargs):
+        instance = self.get_object()
+        self._check_recu_editable(request, instance)
+        if _is_admin(request.user):
+            _log_action(request.user, "suppression_recu", fiche=instance.fiche, recu=instance,
+                        detail=f"Reçu #{instance.id} du {instance.date} supprimé (fiche du {instance.fiche.date if instance.fiche else '?'}).")
+        return super().destroy(request, *args, **kwargs)
+
+    @action(detail=True, methods=["post"], url_path="valider")
+    def valider(self, request, pk=None):
+        """Valide un reçu de vente (admin uniquement)."""
+        if not _is_admin(request.user):
+            return Response({"detail": "Seul l'administrateur peut valider un reçu."}, status=403)
+        instance = self.get_object()
+        if instance.statut == "valide":
+            return Response({"detail": "Ce reçu est déjà validé."}, status=400)
+        instance.statut = "valide"
+        instance.validated_by = request.user
+        instance.validated_at = timezone.now()
+        instance.save(update_fields=["statut", "validated_by", "validated_at"])
+        _log_action(
+            request.user, "validation_recu",
+            fiche=instance.fiche, recu=instance,
+            detail=f"Reçu #{instance.id} du {instance.date} validé (fiche du {instance.fiche.date if instance.fiche else '?'}).",
+        )
+        return Response(self.get_serializer(instance).data)
+
+
+class ParametreBonusViewSet(viewsets.ViewSet):
+    """
+    Singleton admin : GET pour lire, PATCH pour modifier.
+    """
+    def list(self, request):
+        obj = ParametreBonus.get_instance()
+        return Response(ParametreBonusSerializer(obj).data)
+
+    def partial_update(self, request, pk=None):
+        if not _is_admin(request.user):
+            return Response({"detail": "Réservé à l'administrateur."}, status=403)
+        obj = ParametreBonus.get_instance()
+        serializer = ParametreBonusSerializer(obj, data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+        return Response(serializer.data)
+
+
+class ActionLogViewSet(viewsets.ReadOnlyModelViewSet):
+    """
+    Journal d'audit.
+    - Admin : voit tous les logs, peut filtrer par superviseur, peut annuler.
+    - Superviseur : voit uniquement les logs où il est concerné.
+    """
+    serializer_class = ActionLogSerializer
+
+    @action(detail=True, methods=["post"], url_path="annuler", permission_classes=[IsAdmin])
+    def annuler(self, request, pk=None):
+        import json
+        import datetime
+        from decimal import Decimal, InvalidOperation
+        from django.apps import apps
+        from accounts.models import Notification
+
+        try:
+            log = ActionLog.objects.select_related("acteur", "superviseur", "fiche").get(pk=pk)
+        except ActionLog.DoesNotExist:
+            return Response({"detail": "Action introuvable."}, status=404)
+
+        if log.annule:
+            return Response({"detail": "Cette action a déjà été annulée."}, status=400)
+
+        REVERSIBLE_REF = {
+            "modification_secteur":  ("secteurs",  "Secteur"),
+            "modification_agent":    ("agents",    "AgentTerrain"),
+            "modification_materiel": ("materiels", "MaterielEquipement"),
+            "modification_recolteur":("recolteurs","Personnel"),
+        }
+        if log.action not in REVERSIBLE_REF and log.action != "soumission_fiche":
+            return Response({"detail": "Ce type d'action ne peut pas être annulé."}, status=400)
+
+        raison = (request.data.get("raison") or "").strip()
+
+        try:
+            parsed = json.loads(log.detail) if log.detail else {}
+        except Exception:
+            parsed = {}
+
+        revert_label = parsed.get("label", log.get_action_display())
+
+        # ── Revert soumission fiche ──────────────────────────────────
+        if log.action == "soumission_fiche":
+            fiche = log.fiche
+            if not fiche:
+                return Response({"detail": "Fiche introuvable."}, status=404)
+            if fiche.statut == "brouillon":
+                return Response({"detail": "La fiche est déjà en brouillon."}, status=400)
+            fiche.statut = "brouillon"
+            fiche.validated_by = None
+            fiche.validated_at = None
+            fiche.save(update_fields=["statut", "validated_by", "validated_at"])
+
+        # ── Revert modification référentiel ──────────────────────────
+        else:
+            app_label, model_name = REVERSIBLE_REF[log.action]
+            object_id  = parsed.get("object_id")
+            before_raw = parsed.get("before_raw", {})
+
+            if not object_id:
+                return Response(
+                    {"detail": "ID manquant — cette entrée a été créée avant l'activation de l'annulation."},
+                    status=400,
+                )
+            if not before_raw:
+                return Response(
+                    {"detail": "Données de restauration manquantes — entrée créée avant l'activation de l'annulation."},
+                    status=400,
+                )
+
+            Model = apps.get_model(app_label, model_name)
+            try:
+                obj = Model.objects.get(pk=object_id)
+            except Model.DoesNotExist:
+                return Response({"detail": "L'objet n'existe plus dans la base de données."}, status=404)
+
+            def _apply(obj, field_name, val):
+                if not hasattr(obj, field_name):
+                    return
+                try:
+                    fo = obj._meta.get_field(field_name)
+                    ft = fo.get_internal_type()
+                    nullable = getattr(fo, "null", False)
+                    if val is None:
+                        setattr(obj, field_name, None if nullable else "")
+                    elif ft == "DecimalField":
+                        setattr(obj, field_name, Decimal(str(val)))
+                    elif ft in ("IntegerField", "PositiveIntegerField", "BigIntegerField", "SmallIntegerField"):
+                        setattr(obj, field_name, int(val))
+                    elif ft == "BooleanField":
+                        setattr(obj, field_name, val if isinstance(val, bool) else str(val).lower() in ("true", "1"))
+                    elif ft == "DateField":
+                        setattr(obj, field_name, datetime.date.fromisoformat(str(val)) if val else None)
+                    elif ft in ("ForeignKey",):
+                        setattr(obj, field_name, int(val) if val else None)
+                    else:
+                        setattr(obj, field_name, str(val) if val is not None else ("" if not nullable else None))
+                except (ValueError, InvalidOperation):
+                    pass
+
+            for field_name, val in before_raw.items():
+                _apply(obj, field_name, val)
+            obj.save()
+
+        # ── Marquer log comme annulé ─────────────────────────────────
+        log.annule = True
+        log.save(update_fields=["annule"])
+
+        # ── Log de l'annulation ──────────────────────────────────────
+        ActionLog.objects.create(
+            acteur=request.user,
+            superviseur=log.acteur,
+            action="annulation_action",
+            fiche=log.fiche,
+            detail=json.dumps({
+                "label": f"Annulation : {revert_label}",
+                "reverts_id": log.id,
+                "raison": raison,
+            }, ensure_ascii=False),
+        )
+
+        # ── Notification au superviseur ──────────────────────────────
+        target = log.acteur
+        if target:
+            msg = f"L'administrateur a annulé une de vos actions : {revert_label}."
+            if raison:
+                msg += f" Raison : {raison}"
+            Notification.objects.create(
+                user=target,
+                message=msg,
+                type="warning",
+                lien="/mon-audit",
+            )
+
+        return Response({"ok": True})
+
+    def get_queryset(self):
+        is_admin = _is_admin(self.request.user)
+        qs = ActionLog.objects.select_related(
+            "acteur", "superviseur", "fiche", "recu"
+        )
+
+        if not is_admin:
+            # Superviseur voit : actions admin sur ses fiches + ses propres actions
+            qs = qs.filter(
+                Q(superviseur=self.request.user) | Q(acteur=self.request.user)
+            )
+        else:
+            superviseur_id = self.request.query_params.get("superviseur")
+            if superviseur_id:
+                qs = qs.filter(superviseur_id=superviseur_id)
+
+        action = self.request.query_params.get("action")
+        date_debut = self.request.query_params.get("date_debut")
+        date_fin   = self.request.query_params.get("date_fin")
+
+        if action:
+            qs = qs.filter(action=action)
+        if date_debut:
+            qs = qs.filter(timestamp__date__gte=date_debut)
+        if date_fin:
+            qs = qs.filter(timestamp__date__lte=date_fin)
+        return qs

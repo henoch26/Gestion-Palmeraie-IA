@@ -8,8 +8,25 @@ from rest_framework import viewsets
 from rest_framework.decorators import action
 
 from utils.permissions import IsAdmin
+from utils.audit import log_action, snapshot, diff_fields, build_revert_meta
 from .models import MaterielEquipement, MaterielUtiliseTravaux
 from .serializers import MaterielEquipementSerializer, MaterielUtiliseTravauxSerializer
+
+_MATERIEL_LABELS = {
+    "numero":                    "N°",
+    "designation":               "Désignation",
+    "quantite":                  "Quantité",
+    "categorie":                 "Catégorie",
+    "etat_physique":             "État physique",
+    "statut_utilisation":        "Statut utilisation",
+    "fournisseur":               "Fournisseur",
+    "localisation":              "Localisation",
+    "responsable":               "Responsable",
+    "date_acquisition":          "Date acquisition",
+    "valeur_achat":              "Valeur achat",
+    "date_derniere_maintenance": "Dernière maintenance",
+    "date_prochaine_maintenance":"Prochaine maintenance",
+}
 
 
 def _send_wb(wb, filename: str) -> HttpResponse:
@@ -38,6 +55,43 @@ class MaterielEquipementViewSet(viewsets.ModelViewSet):
         if self.action in ("export",):
             return [IsAdmin()]
         return super().get_permissions()
+
+    def create(self, request, *args, **kwargs):
+        response = super().create(request, *args, **kwargs)
+        if response.status_code in (200, 201):
+            try:
+                inst = MaterielEquipement.objects.get(pk=response.data["id"])
+                snap = snapshot(inst, _MATERIEL_LABELS)
+            except Exception:
+                snap = {}
+            designation = response.data.get("designation", "") or f"#{response.data.get('id', '')}"
+            log_action(request.user, "creation_materiel",
+                       detail=f"Matériel « {designation} » créé.",
+                       meta={"snapshot": snap})
+        return response
+
+    def update(self, request, *args, **kwargs):
+        instance = self.get_object()
+        pk = instance.pk
+        before = snapshot(instance, _MATERIEL_LABELS)
+        before_raw = build_revert_meta(instance, _MATERIEL_LABELS)
+        response = super().update(request, *args, **kwargs)
+        if response.status_code == 200:
+            fresh = MaterielEquipement.objects.get(pk=pk)
+            after = snapshot(fresh, _MATERIEL_LABELS)
+            changes = diff_fields(before, after)
+            log_action(request.user, "modification_materiel",
+                       detail=f"Matériel « {fresh.designation} » modifié.",
+                       meta={"changes": changes, "object_id": pk, "object_type": "materiel", "before_raw": before_raw})
+        return response
+
+    def destroy(self, request, *args, **kwargs):
+        instance = self.get_object()
+        snap = snapshot(instance, _MATERIEL_LABELS)
+        log_action(request.user, "suppression_materiel",
+                   detail=f"Matériel « {instance.designation} » supprimé.",
+                   meta={"snapshot": snap})
+        return super().destroy(request, *args, **kwargs)
 
     @action(detail=False, methods=["get"], url_path="export")
     def export(self, request):

@@ -9,5 +9,10 @@ export const deleteSecteur = (id) => apiDelete(`${endpoints.secteurs}${id}/`);
 
 // Analytics
 export const getSecteur = (id) => apiGet(`${endpoints.secteurs}${id}/`);
-export const getSecteurAnalytics = (id, year) =>
-  apiGet(`${endpoints.secteurs}${id}/analytics/${year ? `?year=${encodeURIComponent(year)}` : ""}`);
+export const getSecteurAnalytics = (id, year, createdBy = null) => {
+  const params = new URLSearchParams();
+  if (year) params.set("year", year);
+  if (createdBy) params.set("created_by", createdBy);
+  const qs = params.toString();
+  return apiGet(`${endpoints.secteurs}${id}/analytics/${qs ? `?${qs}` : ""}`);
+};

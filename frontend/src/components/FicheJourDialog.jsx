@@ -82,7 +82,22 @@ function buildPDF(date, fiches, dateLabel) {
     doc.setTextColor(...sc);
     doc.setFont("helvetica", "bold");
     doc.text((fiche.statut || "—").toUpperCase(), pageW - margin, y, { align: "right" });
-    y += 10;
+    y += 7;
+
+    // ── Adjoints ──
+    const adjoints = fiche.superviseurs_adjoints || [];
+    if (adjoints.length > 0) {
+      doc.setFontSize(9);
+      doc.setFont("helvetica", "normal");
+      doc.setTextColor(100, 100, 100);
+      doc.text("Adjoints :", margin, y);
+      doc.setFont("helvetica", "bold");
+      doc.setTextColor(34, 34, 34);
+      const adjointsText = adjoints.map((a) => a.nom).join(", ");
+      doc.text(adjointsText, margin + 22, y);
+      y += 7;
+    }
+    y += 3;
 
     // ── KPI boxes ──
     const kpis = [
@@ -198,7 +213,6 @@ export default function FicheJourDialog({ open, date, fiches, loading, onClose }
         display: "flex", alignItems: "center", justifyContent: "center",
         padding: 16,
       }}
-      onClick={(e) => { if (e.target === overlayRef.current) onClose(); }}
     >
       <div style={{
         background: "#fff", borderRadius: 12,
@@ -275,7 +289,7 @@ export default function FicheJourDialog({ open, date, fiches, loading, onClose }
                 </div>
               )}
 
-              <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center", marginBottom: 12, fontSize: 12, color: "#666" }}>
+              <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center", marginBottom: 8, fontSize: 12, color: "#666" }}>
                 <span>Superviseur : <strong>{fiche.superviseur_general}</strong></span>
                 <span style={{
                   padding: "2px 10px", borderRadius: 12, fontWeight: 700, fontSize: 11,
@@ -285,6 +299,22 @@ export default function FicheJourDialog({ open, date, fiches, loading, onClose }
                   {fiche.statut}
                 </span>
               </div>
+
+              {/* Superviseurs adjoints */}
+              {(fiche.superviseurs_adjoints || []).length > 0 && (
+                <div style={{ marginBottom: 12, fontSize: 12, color: "#555", display: "flex", flexWrap: "wrap", gap: 6, alignItems: "center" }}>
+                  <span style={{ color: "#888" }}>Adjoint{fiche.superviseurs_adjoints.length > 1 ? "s" : ""} :</span>
+                  {fiche.superviseurs_adjoints.map((a, i) => (
+                    <span key={i} style={{
+                      background: "#e8f5e9", color: "#2e7d32",
+                      borderRadius: 12, padding: "2px 10px",
+                      fontWeight: 600, fontSize: 11,
+                    }}>
+                      {a.nom}
+                    </span>
+                  ))}
+                </div>
+              )}
 
               <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 16 }}>
                 <StatBadge label="Total" value={fiche.total_regimes} color="#222" />

@@ -46,7 +46,7 @@ export default function RecolteurDialog({ open, onClose, onSubmit, initial }) {
   };
 
   return (
-    <div className="dialog-backdrop" onClick={onClose}>
+    <div className="dialog-backdrop">
       <div className="dialog dialog-md" onClick={(e) => e.stopPropagation()}>
         <button className="dialog-close" onClick={onClose}>Fermer</button>
         <h3>{initial ? "Modifier personnel" : "Ajouter personnel"}</h3>
@@ -93,13 +93,13 @@ export default function RecolteurDialog({ open, onClose, onSubmit, initial }) {
             <legend>Paiements mobiles</legend>
 
             <label className="checkbox-label">
-              <input type="checkbox" name="whatsapp_actif" checked={form.whatsapp_actif} onChange={handleChange} />
               <span>WhatsApp actif sur ce numéro</span>
+              <input type="checkbox" name="whatsapp_actif" checked={form.whatsapp_actif} onChange={handleChange} />
             </label>
 
             <label className="checkbox-label">
-              <input type="checkbox" name="est_wave" checked={form.est_wave} onChange={handleChange} />
               <span>Compte Wave</span>
+              <input type="checkbox" name="est_wave" checked={form.est_wave} onChange={handleChange} />
             </label>
           </fieldset>
 

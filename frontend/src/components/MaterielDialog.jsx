@@ -90,7 +90,7 @@ export default function MaterielDialog({ open, onClose, onSubmit, initial }) {
   };
 
   return (
-    <div className="dialog-backdrop" onClick={onClose}>
+    <div className="dialog-backdrop">
       <div className="dialog dialog-md" onClick={(e) => e.stopPropagation()}>
         <button className="dialog-close" onClick={onClose}>Fermer</button>
         <h3>{initial ? "Modifier matériel" : "Ajouter matériel"}</h3>

@@ -3,6 +3,7 @@ import { Chart } from "chart.js/auto";
 
 export default function ChartCard({
   title,
+  subtitle,
   type,
   data,
   options,
@@ -17,25 +18,26 @@ export default function ChartCard({
     const chartRef = useRef(null);           //Sert a stocker le graphique
 
     useEffect(()=>{
-        if (!canvasRef.current) return;     //On arrete tout si canvasRef n'existe pas
+        if (!canvasRef.current) return;
 
-        if (chartRef.current){                  //On detruit le graphique existant
-            chartRef.current.destroy();          //pour ne pas avoir de superposition de graphique
+        chartRef.current?.destroy();
+        chartRef.current = null;
+
+        try {
+            chartRef.current = new Chart(canvasRef.current, {
+                type, data, options,
+                plugins: plugins || [],
+            });
+            if (onChartReady) onChartReady(chartRef.current);
+        } catch (e) {
+            console.error("ChartCard: erreur Chart.js", e);
         }
-
-        // creation d'un nouveau graphique
-
-        chartRef.current = new Chart(canvasRef.current,{
-            type, data, options,
-            plugins: plugins || [],
-        });
-
-        if (onChartReady) onChartReady(chartRef.current);
 
         return () => {
             if (onChartReady) onChartReady(null);
             chartRef.current?.destroy();
-        }
+            chartRef.current = null;
+        };
     },[type,data,options,onChartReady]);
 
     return (
@@ -52,7 +54,14 @@ export default function ChartCard({
             
             >
                 <div className="chart-card-head">
-                  <h3>{title}</h3>
+                  <div>
+                    <h3>{title}</h3>
+                    {subtitle && (
+                      <p style={{ margin: "2px 0 0", fontSize: 11, color: "#888", fontStyle: "italic", fontWeight: 500 }}>
+                        {subtitle}
+                      </p>
+                    )}
+                  </div>
                   {headerRight && (
                     <div
                       className="chart-card-head-right"
@@ -64,7 +73,9 @@ export default function ChartCard({
                     </div>
                   )}
                 </div>
-                <canvas ref={canvasRef} />
+                <div className="chart-canvas-wrapper">
+                  <canvas ref={canvasRef} />
+                </div>
             </div>
         );
 

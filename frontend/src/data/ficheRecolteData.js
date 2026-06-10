@@ -29,6 +29,7 @@ const emptyBySecteur = () =>
 export const ficheRecolteInitial = {
   date: "",
   superviseurGeneral: "",
+  superviseurGeneralId: null,
   superviseursAdjoints: [
     { id: "SA-001", nom: "K. Kouassi", secteur: "GP_1", agentId: null },
     { id: "SA-002", nom: "M. Yao", secteur: "GP_2", agentId: null },
@@ -57,9 +58,5 @@ export const ficheRecolteInitial = {
     transport: "",
     salaire: "",
   },
-  // Recu de vente (1 par defaut, on peut en ajouter d'autres si besoin)
-  recus: [
-    { id: "RC-001", date: "", client: "", peseeKg: "", nonConformes: "", montant: "" },
-  ],
   observations: "",
 };

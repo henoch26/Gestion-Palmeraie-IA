@@ -8,6 +8,7 @@ import {
 import { useToast } from "../../context/ToastContext.jsx";
 import { listSecteurs } from "../../services/secteurService.js";
 import { createFiche, getRecoltesAnalytics, listFiches, patchFiche, updateFiche } from "../../services/recolteService.js";
+import { createRecuVente, deleteRecuVente, getParametreBonus, listRecusVente, updateRecuVente, validerRecu } from "../../services/recuVenteService.js";
 import { useRecoltes } from "../../context/RecoltesContext.jsx";
 import { useAuth } from "../../context/AuthContext.jsx";
 import { listRecolteurs } from "../../services/recolteurService.js";
@@ -27,6 +28,214 @@ import { getToken } from "../../services/authService.js";
 import { saveRecolteOffline } from "../../utils/offline.js";
 
 const API_BASE = import.meta.env.VITE_API_URL || "http://127.0.0.1:8000/api";
+
+// ── Dialog création / modification d'un recu de vente ────────────────────────
+const VENTE_EMPTY = {
+  fiche: "", date: "", client_obj: "", client: "",
+  pesee_kg: "", non_conformes_pct: "", montant: "", prix_officiel: "",
+  reference_facture: "", mode_paiement: "", vehicule_transport: "",
+};
+
+function VenteDialog({ open, row, isAdmin, historyRows, clientsList, saving, onClose, onSubmit }) {
+  const [form, setForm] = useState(VENTE_EMPTY);
+  const [errors, setErrors] = useState({});
+
+  useEffect(() => {
+    if (!open) return;
+    if (row) {
+      setForm({
+        fiche: row.fiche ?? "",
+        date: row.date ?? "",
+        client_obj: row.client_obj ?? "",
+        client: row.client ?? "",
+        pesee_kg: row.pesee_kg ?? "",
+        non_conformes_pct: row.non_conformes_pct ?? "",
+        montant: row.montant ?? "",
+        prix_officiel: row.prix_officiel ?? "",
+        reference_facture: row.reference_facture ?? "",
+        mode_paiement: row.mode_paiement ?? "",
+        vehicule_transport: row.vehicule_transport ?? "",
+      });
+    } else {
+      setForm({ ...VENTE_EMPTY });
+    }
+    setErrors({});
+  }, [open, row]);
+
+  if (!open) return null;
+
+  const set = (field, value) => {
+    setForm((p) => ({ ...p, [field]: value }));
+    setErrors((p) => ({ ...p, [field]: null }));
+  };
+
+  const prixCalcule = form.pesee_kg && form.montant && Number(form.pesee_kg) > 0
+    ? (Number(form.montant) / Number(form.pesee_kg)).toFixed(2)
+    : null;
+
+  const rapport = prixCalcule && form.prix_officiel && Number(form.prix_officiel) > 0
+    ? (Number(prixCalcule) / Number(form.prix_officiel)).toFixed(4)
+    : null;
+
+  const submit = () => {
+    const errs = {};
+    if (!form.fiche) errs.fiche = "Fiche de recolte requise";
+    if (!form.date) errs.date = "Date requise";
+    if (!form.montant || Number(form.montant) <= 0) errs.montant = "Montant requis";
+    if (Object.keys(errs).length) { setErrors(errs); return; }
+
+    const payload = {
+      fiche: Number(form.fiche),
+      date: form.date,
+      client: form.client || "",
+      client_obj: form.client_obj ? Number(form.client_obj) : null,
+      pesee_kg: form.pesee_kg !== "" ? Number(form.pesee_kg) : 0,
+      non_conformes_pct: form.non_conformes_pct !== "" ? Number(form.non_conformes_pct) : 0,
+      montant: Number(form.montant),
+      prix_officiel: isAdmin && form.prix_officiel !== "" ? Number(form.prix_officiel) : undefined,
+      reference_facture: form.reference_facture || "",
+      mode_paiement: form.mode_paiement || null,
+      vehicule_transport: form.vehicule_transport || "",
+    };
+    if (!isAdmin) delete payload.prix_officiel;
+    onSubmit(payload);
+  };
+
+  const ficheOptions = (historyRows || []).filter((f) => f.statut === "valide");
+
+  return (
+    <div className="dialog-backdrop" onClick={onClose}>
+      <div className="dialog" style={{ padding: 0, overflow: "hidden", maxWidth: 540, width: "95%" }}
+        onClick={(e) => e.stopPropagation()}>
+
+        <div style={{ background: "linear-gradient(135deg, #1f4e79 0%, #2e7d32 100%)", padding: "18px 20px 14px", color: "#fff", position: "relative" }}>
+          <div style={{ fontWeight: 700, fontSize: 15 }}>{row ? "Modifier le recu de vente" : "Nouveau recu de vente"}</div>
+          <div style={{ fontSize: 12, opacity: 0.85, marginTop: 2 }}>{row ? `Recu #${row.id}` : "Rattacher a une fiche de recolte"}</div>
+          <button onClick={onClose} style={{ position: "absolute", top: 12, right: 12, background: "rgba(255,255,255,0.2)", border: "none", borderRadius: 6, color: "#fff", padding: "4px 10px", cursor: "pointer", fontSize: 12, fontWeight: 600 }}>✕</button>
+        </div>
+
+        <div style={{ padding: "18px 20px", maxHeight: "65vh", overflowY: "auto" }}>
+          {/* Fiche */}
+          <div className="mfield" style={{ marginBottom: 12 }}>
+            <label className="mfield-label">Fiche de recolte <span style={{ color: "#d32f2f" }}>*</span></label>
+            <select className={`mfield-input${errors.fiche ? " mfield-input--error" : ""}`}
+              value={form.fiche} onChange={(e) => set("fiche", e.target.value)}>
+              <option value="">-- Choisir une fiche --</option>
+              {ficheOptions.map((f) => (
+                <option key={f.id} value={f.id}>
+                  {f.date} — {f.superviseur_general || f.created_by_username || `#${f.id}`}
+                  {f.total_regimes ? ` · ${Number(f.total_regimes).toLocaleString("fr-FR")} régimes` : ""}
+                  {f.nb_recolteurs ? ` · ${f.nb_recolteurs} récolteur${f.nb_recolteurs > 1 ? "s" : ""}` : ""}
+                </option>
+              ))}
+            </select>
+            {errors.fiche && <span className="mfield-error">{errors.fiche}</span>}
+          </div>
+
+          {/* Date vente */}
+          <div className="mfield" style={{ marginBottom: 12 }}>
+            <label className="mfield-label">Date de vente <span style={{ color: "#d32f2f" }}>*</span></label>
+            <input type="date" className={`mfield-input${errors.date ? " mfield-input--error" : ""}`}
+              value={form.date} onChange={(e) => set("date", e.target.value)} />
+            {errors.date && <span className="mfield-error">{errors.date}</span>}
+          </div>
+
+          {/* Client */}
+          <div className="mfield" style={{ marginBottom: 12 }}>
+            <label className="mfield-label">Client</label>
+            <select className="mfield-input" value={form.client_obj} onChange={(e) => {
+              const id = e.target.value;
+              const found = (clientsList || []).find((c) => String(c.id) === String(id));
+              set("client_obj", id);
+              set("client", found ? found.nom : "");
+            }}>
+              <option value="">-- Choisir un client --</option>
+              {(clientsList || []).map((c) => (
+                <option key={c.id} value={c.id}>{c.nom}</option>
+              ))}
+            </select>
+          </div>
+
+          {/* Pesée + Non conformes */}
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 12 }}>
+            <div className="mfield">
+              <label className="mfield-label">Pesee (kg)</label>
+              <input type="number" min="0" step="0.01" className="mfield-input"
+                value={form.pesee_kg} onChange={(e) => set("pesee_kg", e.target.value)} />
+            </div>
+            <div className="mfield">
+              <label className="mfield-label">Non conformes (%)</label>
+              <input type="number" min="0" max="100" step="0.01" className="mfield-input"
+                value={form.non_conformes_pct} onChange={(e) => set("non_conformes_pct", e.target.value)} />
+            </div>
+          </div>
+
+          {/* Montant */}
+          <div className="mfield" style={{ marginBottom: 12 }}>
+            <label className="mfield-label">Montant (FCFA) <span style={{ color: "#d32f2f" }}>*</span></label>
+            <input type="number" min="0" className={`mfield-input${errors.montant ? " mfield-input--error" : ""}`}
+              value={form.montant} onChange={(e) => set("montant", e.target.value)} />
+            {errors.montant && <span className="mfield-error">{errors.montant}</span>}
+          </div>
+
+          {/* Prix calculé (lecture seule) */}
+          {prixCalcule && (
+            <div style={{ background: "#e8f5e9", border: "1px solid #a5d6a7", borderRadius: 6, padding: "8px 12px", marginBottom: 12, fontSize: 13 }}>
+              <strong>Prix calcule :</strong> {Number(prixCalcule).toLocaleString("fr-FR")} FCFA/kg
+              {rapport && isAdmin && (
+                <span style={{ marginLeft: 16 }}>
+                  <strong>Rapport :</strong>{" "}
+                  <span style={{ color: Number(rapport) >= 1 ? "#2e7d32" : "#c62828", fontWeight: 700 }}>{rapport}</span>
+                </span>
+              )}
+            </div>
+          )}
+
+          {/* Prix officiel — admin uniquement */}
+          {isAdmin && (
+            <div className="mfield" style={{ marginBottom: 12 }}>
+              <label className="mfield-label">Prix officiel (FCFA/kg) <span style={{ fontSize: 11, color: "#888" }}>(admin)</span></label>
+              <input type="number" min="0" step="0.01" className="mfield-input"
+                value={form.prix_officiel} onChange={(e) => set("prix_officiel", e.target.value)} />
+            </div>
+          )}
+
+          {/* Référence + Mode paiement + Véhicule */}
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 12 }}>
+            <div className="mfield">
+              <label className="mfield-label">Reference facture</label>
+              <input className="mfield-input" value={form.reference_facture}
+                onChange={(e) => set("reference_facture", e.target.value)} />
+            </div>
+            <div className="mfield">
+              <label className="mfield-label">Mode de paiement</label>
+              <select className="mfield-input" value={form.mode_paiement || ""}
+                onChange={(e) => set("mode_paiement", e.target.value || null)}>
+                <option value="">--</option>
+                <option value="espece">Espece</option>
+                <option value="virement">Virement</option>
+              </select>
+            </div>
+          </div>
+          <div className="mfield" style={{ marginBottom: 4 }}>
+            <label className="mfield-label">Vehicule de transport</label>
+            <input className="mfield-input" value={form.vehicule_transport}
+              onChange={(e) => set("vehicule_transport", e.target.value)} />
+          </div>
+        </div>
+
+        <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, padding: "14px 20px", borderTop: "1px solid #f0f0f0", background: "#fafafa" }}>
+          <button type="button" onClick={onClose} style={{ padding: "8px 18px", borderRadius: 6, border: "1px solid #ddd", background: "#fff", cursor: "pointer", fontSize: 13, color: "#555" }}>
+            Annuler
+          </button>
+          <button type="button" onClick={submit} disabled={saving} style={{ padding: "8px 20px", borderRadius: 6, border: "none", background: "linear-gradient(135deg, #1f4e79, #2e7d32)", color: "#fff", fontWeight: 700, cursor: saving ? "not-allowed" : "pointer", fontSize: 13, opacity: saving ? 0.7 : 1 }}>
+            {saving ? "Enregistrement..." : row ? "Mettre a jour" : "Enregistrer"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 // Page Fiche de recolte (format papier)
 export default function HistoriqueRecoltes() {
@@ -70,6 +279,76 @@ export default function HistoriqueRecoltes() {
   const [confirmValidate, setConfirmValidate] = useState({ open: false, ficheId: null });
   const [historyFilter, setHistoryFilter] = useState("all");
 
+  // ── Ventes ───────────────────────────────────────────────────────────────
+  const currentYear = new Date().getFullYear();
+  const [baremeDefaut, setBaremeDefaut] = useState({ grands: 60, moyens: 50, petits: 25 });
+
+  const [ventesRows, setVentesRows] = useState([]);
+  const [loadingVentes, setLoadingVentes] = useState(false);
+  const [ventesYear, setVentesYear] = useState(currentYear);
+  const [venteDialog, setVenteDialog] = useState({ open: false, row: null });
+  const [venteSaving, setVenteSaving] = useState(false);
+  const [venteToDelete, setVenteToDelete] = useState(null);
+  const [venteToValidate, setVenteToValidate] = useState(null);
+  const [venteSearch, setVenteSearch] = useState("");
+  const ventesYears = Array.from({ length: 5 }, (_, i) => currentYear - i);
+
+  const loadVentes = async (year) => {
+    setLoadingVentes(true);
+    try {
+      const data = await listRecusVente({ year });
+      setVentesRows(Array.isArray(data) ? data : (data.results || []));
+    } catch (err) {
+      pushToast({ type: "error", title: "Ventes", message: err.message });
+    } finally {
+      setLoadingVentes(false);
+    }
+  };
+
+  const handleVenteSave = async (payload) => {
+    setVenteSaving(true);
+    try {
+      if (venteDialog.row) {
+        const updated = await updateRecuVente(venteDialog.row.id, payload);
+        setVentesRows((prev) => prev.map((r) => r.id === updated.id ? updated : r));
+        pushToast({ type: "success", title: "Ventes", message: "Recu mis a jour." });
+      } else {
+        const created = await createRecuVente(payload);
+        setVentesRows((prev) => [created, ...prev]);
+        pushToast({ type: "success", title: "Ventes", message: "Recu enregistre." });
+      }
+      setVenteDialog({ open: false, row: null });
+    } catch (err) {
+      pushToast({ type: "error", title: "Ventes", message: err.message });
+    } finally {
+      setVenteSaving(false);
+    }
+  };
+
+  const handleVenteDelete = async () => {
+    try {
+      await deleteRecuVente(venteToDelete.id);
+      setVentesRows((prev) => prev.filter((r) => r.id !== venteToDelete.id));
+      pushToast({ type: "success", title: "Ventes", message: "Recu supprime." });
+    } catch (err) {
+      pushToast({ type: "error", title: "Ventes", message: err.message });
+    } finally {
+      setVenteToDelete(null);
+    }
+  };
+
+  const handleVenteValider = async () => {
+    try {
+      const updated = await validerRecu(venteToValidate.id);
+      setVentesRows((prev) => prev.map((r) => r.id === updated.id ? updated : r));
+      pushToast({ type: "success", title: "Ventes", message: "Recu valide." });
+    } catch (err) {
+      pushToast({ type: "error", title: "Ventes", message: err.message });
+    } finally {
+      setVenteToValidate(null);
+    }
+  };
+
   // Reconstruit l'état du formulaire depuis une fiche API (pour l'édition)
   const ficheToFormState = (apiFiche, sectorList) => {
     const codes = sectorList.map((s) => s.code);
@@ -99,6 +378,7 @@ export default function HistoriqueRecoltes() {
     return {
       date: apiFiche.date || "",
       superviseurGeneral: apiFiche.superviseur_general || "",
+      superviseurGeneralId: apiFiche.superviseur_general_obj || null,
       bareme: {
         grands: apiFiche.bareme_grands ?? 60,
         moyens: apiFiche.bareme_moyens ?? 50,
@@ -117,14 +397,6 @@ export default function HistoriqueRecoltes() {
         agentId: s.agent || null,
       })),
       recolteurs: Array.from(recMap.values()),
-      recus: (apiFiche.recus || []).map((r) => ({
-        id: `RC-${uid()}`,
-        date: r.date || "",
-        client: r.client || "",
-        peseeKg: r.pesee_kg ?? "",
-        nonConformes: r.non_conformes_pct ?? "",
-        montant: r.montant ?? "",
-      })),
     };
   };
 
@@ -237,13 +509,25 @@ export default function HistoriqueRecoltes() {
       0
     );
 
-  // Total dépenses = nourriture + transport + salaire
+  // Salaire total auto-calculé = somme(régimes × barème) pour chaque récolteur
+  const salaireTotalCalcule = useMemo(() => {
+    const bg = Number(fiche.bareme.grands) || 0;
+    const bm = Number(fiche.bareme.moyens) || 0;
+    const bp = Number(fiche.bareme.petits) || 0;
+    return (fiche.recolteurs || []).reduce((total, rec) => {
+      const g = calcTotal(rec.regimes?.grands || {});
+      const m = calcTotal(rec.regimes?.moyens || {});
+      const p = calcTotal(rec.regimes?.petits || {});
+      return total + g * bg + m * bm + p * bp;
+    }, 0);
+  }, [fiche.recolteurs, fiche.bareme, secteurList]);
+
+  // Total dépenses = nourriture + transport + salaire (auto)
   const totalDepenses = useMemo(() => {
     const n = Number(fiche.depenses.nourriture) || 0;
     const t = Number(fiche.depenses.transport) || 0;
-    const s = Number(fiche.depenses.salaire) || 0;
-    return n + t + s;
-  }, [fiche.depenses.nourriture, fiche.depenses.transport, fiche.depenses.salaire]);
+    return n + t + salaireTotalCalcule;
+  }, [fiche.depenses.nourriture, fiche.depenses.transport, salaireTotalCalcule]);
 
   const analyticsYears = useMemo(() => {
     const y = new Date().getFullYear();
@@ -326,6 +610,18 @@ export default function HistoriqueRecoltes() {
     if (!isAdmin && currentUserDisplayName) {
       setFiche((prev) => ({ ...prev, superviseurGeneral: currentUserDisplayName }));
     }
+    // Charger le barème par défaut depuis les paramètres admin
+    getParametreBonus().then((data) => {
+      const rows = Array.isArray(data) ? data : (data.results || [data]);
+      const obj = rows[0] || {};
+      const defaut = {
+        grands: obj.bareme_grands_defaut ?? 60,
+        moyens: obj.bareme_moyens_defaut ?? 50,
+        petits: obj.bareme_petits_defaut ?? 25,
+      };
+      setBaremeDefaut(defaut);
+      setFiche((prev) => ({ ...prev, bareme: defaut }));
+    }).catch(() => {/* silencieux */});
   }, []);
 
   useEffect(() => {
@@ -340,6 +636,13 @@ export default function HistoriqueRecoltes() {
     loadHistory();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tab, historyLoaded]);
+
+  useEffect(() => {
+    if (tab !== "ventes") return;
+    loadVentes(ventesYear);
+    if (!historyLoaded) loadHistory();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tab, ventesYear]);
 
   // Lorsqu'on change d'onglet, on ferme les popups ouvertes (evite les superpositions bizarres)
   useEffect(() => {
@@ -384,18 +687,18 @@ export default function HistoriqueRecoltes() {
     }));
   };
 
-  // Superviseurs adjoints — sélection depuis la liste des agents (capture ID automatique)
-  const handleAdjointNomChange = (id, value) => {
-    const agent = agentsList.find(
-      (a) => (a.nom_complet || `${a.nom} ${a.prenom || ""}`.trim()) === value
-    );
+  // Superviseurs adjoints — sélection depuis la liste déroulante des agents
+  const handleAdjointAgentChange = (adjointId, agentId) => {
+    const agent = agentsList.find((a) => String(a.id) === String(agentId));
     setFiche((prev) => ({
       ...prev,
       superviseursAdjoints: prev.superviseursAdjoints.map((s) =>
-        s.id === id ? { ...s, nom: value, agentId: agent?.id || null } : s
+        s.id === adjointId
+          ? { ...s, nom: agent ? (agent.nom_complet || `${agent.nom} ${agent.prenom || ""}`.trim()) : "", agentId: agent?.id || null }
+          : s
       ),
     }));
-    clearNestedError("adjoints", id, "nom");
+    clearNestedError("adjoints", adjointId, "nom");
   };
 
   const handleAdjointChange = (id, field, value) => {
@@ -481,33 +784,6 @@ export default function HistoriqueRecoltes() {
     }));
   };
 
-  // Recus de vente
-  const handleRecuChange = (id, field, value) => {
-    setFiche((prev) => ({
-      ...prev,
-      recus: prev.recus.map((r) => (r.id === id ? { ...r, [field]: value } : r)),
-    }));
-    clearNestedError("recus", id, field);
-  };
-
-  const addRecu = () => {
-    setFiche((prev) => ({
-      ...prev,
-      recus: [
-        ...prev.recus,
-        { id: `RC-${Date.now()}`, date: "", client: "", peseeKg: "", nonConformes: "", montant: "" },
-      ],
-    }));
-  };
-
-  const removeRecu = (id) => {
-    setFiche((prev) => ({
-      ...prev,
-      recus: prev.recus.filter((r) => r.id !== id),
-    }));
-    clearIdError("recus", id);
-  };
-
   // Valide + construit le payload conforme a l'API (retourne aussi les erreurs par champ)
   const buildPayload = () => {
     const errors = {};
@@ -538,7 +814,7 @@ export default function HistoriqueRecoltes() {
       if (!secteur) {
         adjointsErrors[s.id] = {
           ...(adjointsErrors[s.id] || {}),
-          secteur: "Secteurs ou recolteurs requis",
+          secteur: "Secteur requis",
         };
       }
 
@@ -610,54 +886,19 @@ export default function HistoriqueRecoltes() {
     }
     if (Object.keys(recolteursErrors).length > 0) errors.recolteurs = recolteursErrors;
 
-    // Recus de vente (ignore recus vides; si saisi => date + montant)
-    const recus = [];
-    const recusErrors = {};
-
-    for (const r of fiche.recus || []) {
-      const date = String(r.date || "").trim();
-      const client = String(r.client || "").trim();
-      const pesee = String(r.peseeKg || "").trim();
-      const nonConf = String(r.nonConformes || "").trim();
-      const montantRaw = String(r.montant || "").trim();
-
-      const hasAny = !!date || !!client || !!pesee || !!nonConf || !!montantRaw;
-      if (!hasAny) continue;
-
-      const montant = Number(montantRaw) || 0;
-      if (!date) {
-        recusErrors[r.id] = { ...(recusErrors[r.id] || {}), date: "Date requise" };
-      }
-      if (!(montant > 0)) {
-        recusErrors[r.id] = { ...(recusErrors[r.id] || {}), montant: "Montant requis" };
-      }
-
-      if (date && montant > 0) {
-        recus.push({
-          date: date || null,
-          client,
-          pesee_kg: Number(pesee) || 0,
-          non_conformes_pct: Number(nonConf) || 0,
-          montant,
-        });
-      }
-    }
-
-    if (Object.keys(recusErrors).length > 0) errors.recus = recusErrors;
-
     const payload = {
       date: fiche.date,
       superviseur_general: String(fiche.superviseurGeneral || "").trim(),
+      superviseur_general_obj: fiche.superviseurGeneralId || null,
       bareme_grands: Number(fiche.bareme.grands) || 0,
       bareme_moyens: Number(fiche.bareme.moyens) || 0,
       bareme_petits: Number(fiche.bareme.petits) || 0,
       depense_nourriture: Number(fiche.depenses.nourriture) || 0,
       depense_transport: Number(fiche.depenses.transport) || 0,
-      depense_salaire: Number(fiche.depenses.salaire) || 0,
+      depense_salaire: salaireTotalCalcule,
       observations: fiche.observations || "",
       superviseurs_adjoints,
       lignes,
-      recus,
     };
 
     return { payload, errors };
@@ -709,6 +950,7 @@ export default function HistoriqueRecoltes() {
   const handleReset = () => {
     setFiche({
       ...ficheRecolteInitial,
+      bareme: { ...baremeDefaut },
       superviseurGeneral: !isAdmin && currentUserDisplayName ? currentUserDisplayName : ficheRecolteInitial.superviseurGeneral,
     });
     setFieldErrors({});
@@ -991,6 +1233,30 @@ export default function HistoriqueRecoltes() {
             </button>
           </div>
         )}
+
+        {tab === "ventes" && (
+          <div className="row-actions" style={{ flexWrap: "wrap", gap: 10 }}>
+            <label>
+              Annee
+              <select value={ventesYear} onChange={(e) => { setVentesYear(Number(e.target.value)); }}>
+                {ventesYears.map((y) => <option key={y} value={y}>{y}</option>)}
+              </select>
+            </label>
+            <input
+              type="search"
+              placeholder="Rechercher (client, reference...)"
+              value={venteSearch}
+              onChange={(e) => setVenteSearch(e.target.value)}
+              style={{ padding: "6px 12px", borderRadius: 6, border: "1px solid #ddd", fontSize: 13, minWidth: 220, flex: "1 1 220px" }}
+            />
+            <button className="btn-ghost" onClick={() => loadVentes(ventesYear)} disabled={loadingVentes}>
+              {loadingVentes ? "Chargement..." : "Rafraichir"}
+            </button>
+            <button className="btn-primary" onClick={() => setVenteDialog({ open: true, row: null })}>
+              + Nouveau recu
+            </button>
+          </div>
+        )}
       </div>
 
       {tab === "saisie" && isAdmin && (
@@ -1038,14 +1304,21 @@ export default function HistoriqueRecoltes() {
             Superviseur general
             {isAdmin ? (
               <select
-                name="superviseurGeneral"
                 className={`fiche-input ${fieldErrors.superviseurGeneral ? "input-error" : ""}`}
-                value={fiche.superviseurGeneral}
-                onChange={handleHeaderChange}
+                value={fiche.superviseurGeneralId ?? ""}
+                onChange={(e) => {
+                  const selected = superviseursList.find((s) => String(s.id) === e.target.value);
+                  setFiche((prev) => ({
+                    ...prev,
+                    superviseurGeneralId: selected ? selected.id : null,
+                    superviseurGeneral: selected ? selected.nom_complet : "",
+                  }));
+                  clearSimpleError("superviseurGeneral");
+                }}
               >
                 <option value="">-- Choisir un superviseur --</option>
                 {superviseursList.map((s) => (
-                  <option key={s.id} value={s.display_name}>{s.display_name}</option>
+                  <option key={s.id} value={s.id}>{s.nom_complet}</option>
                 ))}
               </select>
             ) : (
@@ -1071,7 +1344,7 @@ export default function HistoriqueRecoltes() {
         </div>
         {fieldErrors.adjoints && (
           <div className="field-error">
-            Complete les superviseurs adjoints (Nom + Secteurs/Recolteurs).
+            Completez les superviseurs adjoints (Nom + Secteur).
           </div>
         )}
         <div className="fiche-table-wrapper">
@@ -1079,7 +1352,7 @@ export default function HistoriqueRecoltes() {
             <thead>
               <tr>
                 <th>Nom et prenom</th>
-                <th>Secteurs ou recolteurs</th>
+                <th>Secteur</th>
                 <th></th>
               </tr>
             </thead>
@@ -1087,31 +1360,35 @@ export default function HistoriqueRecoltes() {
               {fiche.superviseursAdjoints.map((s) => (
                 <tr key={s.id}>
                   <td>
-                    <SearchableSelect
-                      value={s.nom}
-                      options={(agentsList || []).map((a) => ({
-                        value: a.nom_complet || `${a.nom} ${a.prenom || ""}`.trim(),
-                        label: a.nom_complet || `${a.nom} ${a.prenom || ""}`.trim(),
-                      }))}
-                      onChange={(v) => handleAdjointNomChange(s.id, v)}
-                      placeholder="Nom ou saisie libre"
-                      allowCustom
-                      clearable
-                      className={fieldErrors.adjoints?.[s.id]?.nom ? "input-error" : ""}
-                    />
+                    <select
+                      className={`fiche-input ${fieldErrors.adjoints?.[s.id]?.nom ? "input-error" : ""}`}
+                      value={s.agentId || ""}
+                      onChange={(e) => handleAdjointAgentChange(s.id, e.target.value)}
+                    >
+                      <option value="">-- Choisir un agent --</option>
+                      {(agentsList || []).filter((a) => a.actif).map((a) => (
+                        <option key={a.id} value={a.id}>
+                          {a.nom_complet || `${a.nom} ${a.prenom || ""}`.trim()}
+                        </option>
+                      ))}
+                    </select>
                     {fieldErrors.adjoints?.[s.id]?.nom && (
                       <div className="field-error">{fieldErrors.adjoints[s.id].nom}</div>
                     )}
                   </td>
                   <td>
-                    <SearchableSelect
+                    <select
+                      className={`fiche-input ${fieldErrors.adjoints?.[s.id]?.secteur ? "input-error" : ""}`}
                       value={s.secteur || ""}
-                      options={secteursOrRecolteursOptions}
-                      onChange={(v) => handleAdjointChange(s.id, "secteur", v)}
-                      placeholder="Rechercher..."
-                      clearable
-                      className={fieldErrors.adjoints?.[s.id]?.secteur ? "input-error" : ""}
-                    />
+                      onChange={(e) => handleAdjointChange(s.id, "secteur", e.target.value)}
+                    >
+                      <option value="">-- Choisir un secteur --</option>
+                      {(secteurList || []).map((sec) => (
+                        <option key={sec.id || sec.code} value={sec.code}>
+                          {sec.code}{sec.nom ? ` — ${sec.nom}` : ""}
+                        </option>
+                      ))}
+                    </select>
                     {fieldErrors.adjoints?.[s.id]?.secteur && (
                       <div className="field-error">{fieldErrors.adjoints[s.id].secteur}</div>
                     )}
@@ -1140,13 +1417,21 @@ export default function HistoriqueRecoltes() {
               {r.label}
               <input
                 type="number"
+                min="0"
                 className="fiche-input"
                 value={fiche.bareme[r.key]}
-                onChange={(e) => handleBaremeChange(r.key, e.target.value)}
+                onChange={(e) => isAdmin && handleBaremeChange(r.key, Math.max(0, Number(e.target.value)))}
+                readOnly={!isAdmin}
+                style={!isAdmin ? { background: "#f5f5f5", color: "#888", cursor: "not-allowed" } : undefined}
               />
             </label>
           ))}
         </div>
+        {!isAdmin && (
+          <p style={{ margin: "6px 0 0", fontSize: 12, color: "#999", fontStyle: "italic" }}>
+            Seul l'administrateur peut modifier le bareme.
+          </p>
+        )}
       </section>
 
       {/* Dombrement des regimes */}
@@ -1208,18 +1493,18 @@ export default function HistoriqueRecoltes() {
                     {idx === 0 && (
                       <td rowSpan={regimeTypes.length} className="row-head">
                         <div className="row-head-content">
-                          <SearchableSelect
+                          <select
+                            className={`fiche-input ${fieldErrors.recolteurs?.[r.id] ? "input-error" : ""}`}
                             value={r.nom}
-                            options={(recolteursList || []).map((x) => ({
-                              value: x.nom,
-                              label: `${x.numero_telephone ? `${x.numero_telephone} - ` : ""}${x.nom}`,
-                              group: "",
-                            }))}
-                            onChange={(v) => handleRecolteurName(r.id, v)}
-                            placeholder="Nom recolteur"
-                            clearable
-                            className={fieldErrors.recolteurs?.[r.id] ? "input-error" : ""}
-                          />
+                            onChange={(e) => handleRecolteurName(r.id, e.target.value)}
+                          >
+                            <option value="">-- Choisir un recolteur --</option>
+                            {(recolteursList || []).map((x) => (
+                              <option key={x.id} value={x.nom}>
+                                {x.numero_telephone ? `${x.numero_telephone} — ` : ""}{x.nom}
+                              </option>
+                            ))}
+                          </select>
                           {fieldErrors.recolteurs?.[r.id] && (
                             <span className="field-error">{fieldErrors.recolteurs[r.id]}</span>
                           )}
@@ -1245,10 +1530,11 @@ export default function HistoriqueRecoltes() {
                       <td key={s.code}>
                         <input
                           type="number"
+                          min="0"
                           className="fiche-input fiche-input-sm"
                           value={r.regimes[reg.key][s.code]}
                           onChange={(e) =>
-                            handleRegimeChange(r.id, reg.key, s.code, e.target.value)
+                            handleRegimeChange(r.id, reg.key, s.code, Math.max(0, Number(e.target.value)) || "")
                           }
                         />
                       </td>
@@ -1298,11 +1584,10 @@ export default function HistoriqueRecoltes() {
           <label>
             Salaire recolteurs
             <input
-              type="number"
-              min="0"
               className="fiche-input"
-              value={fiche.depenses.salaire}
-              onChange={(e) => handleDepenseChange("salaire", e.target.value)}
+              value={salaireTotalCalcule.toLocaleString("fr-FR")}
+              readOnly
+              style={{ fontWeight: 700, background: "#f5f5f5", cursor: "default" }}
             />
           </label>
           <label>
@@ -1317,88 +1602,6 @@ export default function HistoriqueRecoltes() {
         </div>
       </section>
 
-      {/* Recus de vente */}
-      <section className={`fiche-section ${fieldErrors.recus ? "section-error" : ""}`}>
-        <div className="section-row">
-          <h3>Recu de vente</h3>
-          <button className="btn-ghost" onClick={addRecu}>Ajouter recu</button>
-        </div>
-        {fieldErrors.recus && (
-          <div className="field-error">
-            Complete les recus de vente (Date + Montant).
-          </div>
-        )}
-        <div className="recus-grid">
-          {fiche.recus.map((r) => (
-            <div key={r.id} className="recu-card">
-              <div className="recu-header">
-                <strong>Recu</strong>
-                <button className="btn-danger btn-mini" onClick={() => removeRecu(r.id)}>
-                  Supprimer
-                </button>
-              </div>
-              <label>
-                Date
-                <input
-                  type="date"
-                  className={`fiche-input ${
-                    fieldErrors.recus?.[r.id]?.date ? "input-error" : ""
-                  }`}
-                  value={r.date}
-                  onChange={(e) => handleRecuChange(r.id, "date", e.target.value)}
-                />
-                {fieldErrors.recus?.[r.id]?.date && (
-                  <span className="field-error">{fieldErrors.recus[r.id].date}</span>
-                )}
-              </label>
-              <label>
-                Client
-                <ClientSelect
-                  value={r.client}
-                  clients={clientsList}
-                  isAdmin={isAdmin}
-                  onChange={(val) => handleRecuChange(r.id, "client", val)}
-                  onClientAdded={(newClient) =>
-                    setClientsList((prev) => [...prev, newClient].sort((a, b) => a.nom.localeCompare(b.nom)))
-                  }
-                />
-              </label>
-              <label>
-                Pesee (kg)
-                <input
-                  type="number"
-                  className="fiche-input"
-                  value={r.peseeKg}
-                  onChange={(e) => handleRecuChange(r.id, "peseeKg", e.target.value)}
-                />
-              </label>
-              <label>
-                Regimes non conformes (%)
-                <input
-                  type="number"
-                  className="fiche-input"
-                  value={r.nonConformes}
-                  onChange={(e) => handleRecuChange(r.id, "nonConformes", e.target.value)}
-                />
-              </label>
-              <label>
-                Montant (FCFA)
-                <input
-                  type="number"
-                  className={`fiche-input ${
-                    fieldErrors.recus?.[r.id]?.montant ? "input-error" : ""
-                  }`}
-                  value={r.montant}
-                  onChange={(e) => handleRecuChange(r.id, "montant", e.target.value)}
-                />
-                {fieldErrors.recus?.[r.id]?.montant && (
-                  <span className="field-error">{fieldErrors.recus[r.id].montant}</span>
-                )}
-              </label>
-            </div>
-          ))}
-        </div>
-      </section>
 
       {/* Observations */}
       <section className="fiche-section">
@@ -1427,85 +1630,123 @@ export default function HistoriqueRecoltes() {
           <LogoLoader compact size={70} />
         ) : (
           <>
-            <div className="charts-grid">
-              {analytics?.monthly && (
-                <ChartCard
-                  title="Evolution mensuelle (annee en cours vs precedente)"
-                  type="line"
-                  data={{
-                    labels: analytics.monthly.current.labels,
-                    datasets: [
-                      {
-                        label: `${analytics.year}`,
-                        data: analytics.monthly.current.data,
-                        borderColor: "#2E7D32",
-                      },
-                      {
-                        label: `${analytics.year - 1}`,
-                        data: analytics.monthly.previous.data,
-                        borderColor: "#FBC02D",
-                        borderDash: [4, 4],
-                      },
-                    ],
-                  }}
-                  onClick={() =>
-                    setActiveChart({
-                      title: "Evolution mensuelle",
-                      type: "line",
-                      data: {
-                        labels: analytics.monthly.current.labels,
-                        datasets: [
-                          {
-                            label: `${analytics.year}`,
-                            data: analytics.monthly.current.data,
-                            borderColor: "#2E7D32",
-                          },
-                          {
-                            label: `${analytics.year - 1}`,
-                            data: analytics.monthly.previous.data,
-                            borderColor: "#FBC02D",
-                            borderDash: [4, 4],
-                          },
-                        ],
-                      },
-                    })
+            {(() => {
+              const fmtReg = (n) => new Intl.NumberFormat("fr-FR").format(Number(n || 0));
+              const stackedBarPlugin = {
+                id: "analyticsStackedLabels",
+                afterDatasetsDraw(chart) {
+                  if (chart.width < 300) return;
+                  const { ctx } = chart;
+                  chart.data.datasets.forEach((ds, di) => {
+                    const meta = chart.getDatasetMeta(di);
+                    if (meta.hidden) return;
+                    meta.data.forEach((bar, i) => {
+                      const value = Number(ds.data[i]) || 0;
+                      if (!value) return;
+                      const { x, y, base } = bar.getProps(["x", "y", "base"], true);
+                      if (Math.abs(base - y) < 16) return;
+                      ctx.save();
+                      ctx.fillStyle = "#fff";
+                      ctx.textAlign = "center";
+                      ctx.textBaseline = "middle";
+                      ctx.font = "bold 10px sans-serif";
+                      ctx.shadowColor = "rgba(0,0,0,.35)";
+                      ctx.shadowBlur = 2;
+                      ctx.fillText(fmtReg(value), x, (y + base) / 2);
+                      ctx.restore();
+                    });
+                  });
+                  const nBars = chart.data.labels.length;
+                  for (let i = 0; i < nBars; i++) {
+                    let total = 0, topY = Infinity;
+                    chart.data.datasets.forEach((ds, di) => {
+                      const meta = chart.getDatasetMeta(di);
+                      if (meta.hidden) return;
+                      total += Number(ds.data[i]) || 0;
+                      const { y } = meta.data[i].getProps(["y"], true);
+                      if (y < topY) topY = y;
+                    });
+                    if (!total) continue;
+                    const { x } = chart.getDatasetMeta(0).data[i].getProps(["x"], true);
+                    ctx.save();
+                    ctx.fillStyle = "#1f4e79";
+                    ctx.textAlign = "center";
+                    ctx.textBaseline = "bottom";
+                    ctx.font = "bold 11px sans-serif";
+                    ctx.fillText(fmtReg(total), x, topY - 4);
+                    ctx.restore();
                   }
-                />
-              )}
+                },
+              };
 
-              {analytics?.yearly && (
-                <ChartCard
-                  title="Production par annee (5 ans)"
-                  type="bar"
-                  data={{
-                    labels: analytics.yearly.labels,
-                    datasets: [
-                      {
-                        label: "Total regimes",
-                        data: analytics.yearly.data,
-                        backgroundColor: "#66BB6A",
-                      },
-                    ],
-                  }}
-                  onClick={() =>
-                    setActiveChart({
-                      title: "Production par annee",
-                      type: "bar",
-                      data: {
-                        labels: analytics.yearly.labels,
-                        datasets: [
-                          {
-                            label: "Total regimes",
-                            data: analytics.yearly.data,
-                            backgroundColor: "#66BB6A",
-                          },
-                        ],
-                      },
-                    })
-                  }
-                />
-              )}
-            </div>
+              const stackedBarOpts = {
+                responsive: true, maintainAspectRatio: false,
+                layout: { padding: { top: 20 } },
+                plugins: {
+                  legend: { position: "bottom" },
+                  tooltip: { callbacks: { label: (ctx) => `${ctx.dataset.label} : ${fmtReg(ctx.parsed.y)} régimes` } },
+                },
+                scales: {
+                  x: { stacked: true, grid: { display: false } },
+                  y: { stacked: true, beginAtZero: true, ticks: { precision: 0 } },
+                },
+              };
+
+              const buildMonthlyData = (src) => ({
+                labels: src.labels,
+                datasets: [
+                  { label: "Grands", data: src.grands, backgroundColor: "#2e7d32cc", stack: "r" },
+                  { label: "Moyens", data: src.moyens, backgroundColor: "#1565c0cc", stack: "r" },
+                  { label: "Petits", data: src.petits, backgroundColor: "#f9a825cc", stack: "r" },
+                ],
+              });
+
+              const buildYearlyData = (src) => ({
+                labels: src.labels,
+                datasets: [
+                  { label: "Grands",  data: src.grands, backgroundColor: "#2e7d32cc", stack: "r" },
+                  { label: "Moyens",  data: src.moyens, backgroundColor: "#1565c0cc", stack: "r" },
+                  { label: "Petits",  data: src.petits, backgroundColor: "#f9a825cc", stack: "r" },
+                ],
+              });
+
+              return (
+                <div className="charts-grid">
+                  {analytics?.monthly && (
+                    <ChartCard
+                      title={`Production mensuelle ${analyticsYear} par type de régime`}
+                      type="bar"
+                      data={buildMonthlyData(analytics.monthly.current)}
+                      options={stackedBarOpts}
+                      plugins={[stackedBarPlugin]}
+                      onClick={() => setActiveChart({
+                        title: `Production mensuelle ${analyticsYear} par type de régime`,
+                        type: "bar",
+                        data: buildMonthlyData(analytics.monthly.current),
+                        options: stackedBarOpts,
+                        plugins: [stackedBarPlugin],
+                      })}
+                    />
+                  )}
+                  {analytics?.yearly && (
+                    <ChartCard
+                      title="Production annuelle par type de régime (5 ans)"
+                      type="bar"
+                      data={buildYearlyData(analytics.yearly)}
+                      options={stackedBarOpts}
+                      plugins={[stackedBarPlugin]}
+                      onClick={() => setActiveChart({
+                        title: "Production annuelle (5 ans)",
+                        type: "bar",
+                        data: buildYearlyData(analytics.yearly),
+                        options: stackedBarOpts,
+                        plugins: [stackedBarPlugin],
+                      })}
+                    />
+                  )}
+                </div>
+              );
+            })()}
 
             <div className="tables-grid">
               <article className="table-card">
@@ -1594,6 +1835,152 @@ export default function HistoriqueRecoltes() {
             </>
           )}
         </section>
+      )}
+
+      {/* ── Onglet Ventes ───────────────────────────────────────────────── */}
+      {tab === "ventes" && (
+        <section className="fiche-section fiche-history">
+          <h3>Recus de vente — {ventesYear}</h3>
+          {loadingVentes ? (
+            <LogoLoader compact size={70} />
+          ) : (() => {
+            const search = venteSearch.toLowerCase().trim();
+            const filtered = ventesRows.filter((r) => {
+              if (!search) return true;
+              const client = (r.client_nom || r.client || "").toLowerCase();
+              const ref = (r.reference_facture || "").toLowerCase();
+              const ficheDate = (r.fiche_date || "").toLowerCase();
+              const date = (r.date || "").toLowerCase();
+              return client.includes(search) || ref.includes(search) || ficheDate.includes(search) || date.includes(search);
+            });
+            if (filtered.length === 0) return (
+              <p style={{ color: "#aaa", textAlign: "center", padding: 24 }}>
+                {venteSearch ? "Aucun résultat pour cette recherche." : `Aucun recu de vente pour ${ventesYear}.`}
+              </p>
+            );
+            return (
+              <div style={{ overflowX: "auto" }}>
+                <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+                  <thead>
+                    <tr style={{ background: "#1f4e79", color: "#fff" }}>
+                      {["Statut", "Date recolte", "Date vente", "Client", "Pesee (kg)", "Non conformes (%)", "Montant (FCFA)", "Prix calcule (FCFA/kg)", isAdmin ? "Prix officiel (FCFA/kg)" : null, isAdmin ? "Rapport" : null, "Actions"].filter(Boolean).map((h) => (
+                        <th key={h} style={{ padding: "10px 12px", textAlign: "left", fontWeight: 600, whiteSpace: "nowrap" }}>{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filtered.map((row, idx) => {
+                      const isValide = row.statut === "valide";
+                      const canEdit = isAdmin || !isValide;
+                      return (
+                        <tr key={row.id} style={{ background: idx % 2 === 0 ? "#fafafa" : "#fff", borderBottom: "1px solid #f0f0f0" }}>
+                          <td style={{ padding: "8px 12px" }}>
+                            <span style={{
+                              display: "inline-block", padding: "3px 9px", borderRadius: 10, fontSize: 11, fontWeight: 700,
+                              background: isValide ? "#e8f5e9" : "#fff8e1",
+                              color: isValide ? "#2e7d32" : "#f57f17",
+                            }}>
+                              {isValide ? "Validé" : "Brouillon"}
+                            </span>
+                          </td>
+                          <td style={{ padding: "8px 12px" }}>{row.fiche_date || "—"}</td>
+                          <td style={{ padding: "8px 12px" }}>{row.date || "—"}</td>
+                          <td style={{ padding: "8px 12px" }}>{row.client_nom || row.client || "—"}</td>
+                          <td style={{ padding: "8px 12px" }}>{row.pesee_kg != null ? Number(row.pesee_kg).toLocaleString("fr-FR") : "—"}</td>
+                          <td style={{ padding: "8px 12px" }}>{row.non_conformes_pct != null ? `${row.non_conformes_pct} %` : "—"}</td>
+                          <td style={{ padding: "8px 12px", fontWeight: 600 }}>{row.montant != null ? Number(row.montant).toLocaleString("fr-FR") : "—"}</td>
+                          <td style={{ padding: "8px 12px" }}>{row.prix_calcule != null ? Number(row.prix_calcule).toLocaleString("fr-FR") : "—"}</td>
+                          {isAdmin && <td style={{ padding: "8px 12px", color: row.prix_officiel ? "#2e7d32" : "#aaa" }}>{row.prix_officiel ? Number(row.prix_officiel).toLocaleString("fr-FR") : "—"}</td>}
+                          {isAdmin && (
+                            <td style={{ padding: "8px 12px" }}>
+                              {row.rapport_prix != null ? (
+                                <span style={{ fontWeight: 700, color: row.rapport_prix >= 1 ? "#2e7d32" : "#c62828" }}>
+                                  {Number(row.rapport_prix).toFixed(3)}
+                                </span>
+                              ) : "—"}
+                            </td>
+                          )}
+                          <td style={{ padding: "8px 12px" }}>
+                            <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                              {isAdmin && !isValide && (
+                                <button className="btn-success btn-sm" onClick={() => setVenteToValidate(row)}>
+                                  Valider
+                                </button>
+                              )}
+                              {canEdit && (
+                                <button className="btn-secondary btn-sm" onClick={() => setVenteDialog({ open: true, row })}>
+                                  Modifier
+                                </button>
+                              )}
+                              {canEdit && (
+                                <button className="btn-danger btn-sm" onClick={() => setVenteToDelete(row)}>
+                                  Supprimer
+                                </button>
+                              )}
+                              {isValide && !isAdmin && (
+                                <span style={{ fontSize: 11, color: "#888", fontStyle: "italic" }}>Validé</span>
+                              )}
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            );
+          })()}
+        </section>
+      )}
+
+      {/* Dialog création/modification recu vente */}
+      {venteDialog.open && (
+        <VenteDialog
+          open={venteDialog.open}
+          row={venteDialog.row}
+          isAdmin={isAdmin}
+          historyRows={historyRows}
+          clientsList={clientsList}
+          saving={venteSaving}
+          onClose={() => setVenteDialog({ open: false, row: null })}
+          onSubmit={handleVenteSave}
+        />
+      )}
+
+      {/* Confirmation validation recu */}
+      {venteToValidate && (
+        <div className="dialog-backdrop" onClick={() => setVenteToValidate(null)}>
+          <div className="dialog dialog-sm" onClick={(e) => e.stopPropagation()}>
+            <h3>Valider le recu</h3>
+            <p style={{ fontSize: 14, color: "#555", margin: "12px 0 4px" }}>
+              Confirmer la validation du recu du <strong>{venteToValidate.date}</strong> pour <strong>{venteToValidate.client_nom || venteToValidate.client || "client inconnu"}</strong> ?
+            </p>
+            <p style={{ fontSize: 12, color: "#f57f17", margin: "0 0 20px" }}>
+              Une fois valide, seul l'administrateur pourra modifier ou supprimer ce recu.
+            </p>
+            <div className="dialog-actions">
+              <button className="btn-ghost" onClick={() => setVenteToValidate(null)}>Annuler</button>
+              <button className="btn-success" onClick={handleVenteValider}>Valider</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Confirmation suppression recu */}
+      {venteToDelete && (
+        <div className="dialog-backdrop" onClick={() => setVenteToDelete(null)}>
+          <div className="dialog dialog-sm" onClick={(e) => e.stopPropagation()}>
+            <h3>Supprimer le recu</h3>
+            <p style={{ fontSize: 14, color: "#555", margin: "12px 0 20px" }}>
+              Confirmer la suppression du recu du <strong>{venteToDelete.date}</strong> ?
+              Cette action est irreversible.
+            </p>
+            <div className="dialog-actions">
+              <button className="btn-ghost" onClick={() => setVenteToDelete(null)}>Annuler</button>
+              <button className="btn-danger" onClick={handleVenteDelete}>Supprimer</button>
+            </div>
+          </div>
+        </div>
       )}
 
       <FicheDialog

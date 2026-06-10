@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { apiDelete, apiGet, apiPatch, apiPost } from "../../api/axios.js";
 import { endpoints } from "../../api/endpoints.js";
 import { useToast } from "../../context/ToastContext.jsx";
@@ -79,6 +80,7 @@ return (
 
 export default function GestionUtilisateurs() {
   const { user: currentUser } = useAuth();
+  const navigate = useNavigate();
   const { pushToast } = useToast();
   const [users, setUsers] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -90,6 +92,8 @@ export default function GestionUtilisateurs() {
   const [createdCredentials, setCreatedCredentials] = useState(null);
   const [droitsList, setDroitsList] = useState([]);
   const [selectedPermissions, setSelectedPermissions] = useState([]);
+  const [deleteConfirm, setDeleteConfirm] = useState(null);
+  const [resetPwd, setResetPwd] = useState("");
 
   const fetchUsers = async () => {
     try {
@@ -126,6 +130,7 @@ export default function GestionUtilisateurs() {
       role: u.role,
     });
     setSelectedPermissions(u.permissions || []);
+    setResetPwd("");
     setErrors({});
     setShowForm(true);
   };
@@ -134,11 +139,15 @@ export default function GestionUtilisateurs() {
     setEditingUser(null);
     setForm(emptyForm);
     setSelectedPermissions([]);
+    setResetPwd("");
     setErrors({});
     setShowForm(true);
   };
 
-  const closeForm = () => { setShowForm(false); setEditingUser(null); setErrors({}); };
+  const closeForm = () => { setShowForm(false); setEditingUser(null); setResetPwd(""); setErrors({}); };
+
+  // Vrai si l'utilisateur a déjà pris possession de son compte (changé le mot de passe temporaire)
+  const accountOwned = Boolean(editingUser && editingUser.must_change_password === false);
 
   const handleChange = (e) => {
     const { name, value } = e.target;
@@ -151,7 +160,8 @@ export default function GestionUtilisateurs() {
     if (!editingUser && !form.username.trim()) errs.username = "Nom d'utilisateur requis";
     if (!editingUser && !form.password.trim()) errs.password = "Mot de passe requis";
     if (!editingUser && form.password.trim().length < 6) errs.password = "Au moins 6 caracteres";
-    if (editingUser && form.password && form.password.length < 6) errs.password = "Au moins 6 caracteres";
+    if (editingUser && !accountOwned && form.password && form.password.length < 6) errs.password = "Au moins 6 caracteres";
+    if (editingUser && accountOwned && resetPwd && resetPwd.length < 6) errs.resetPwd = "Au moins 6 caracteres";
     return errs;
   };
 
@@ -162,23 +172,37 @@ export default function GestionUtilisateurs() {
 
     setSaving(true);
     try {
-      const payload = { ...form };
-      if (!payload.password) delete payload.password;
-
       if (editingUser) {
-        delete payload.username;
+        const payload = { role: form.role };
+
+        if (accountOwned) {
+          // Compte géré par son titulaire : seuls rôle, droits et réinitialisation MDP autorisés
+          if (resetPwd) {
+            payload.password = resetPwd;
+            payload.must_change_password = true;
+          }
+        } else {
+          // Compte non encore pris en main : on peut modifier les champs personnels
+          payload.first_name = form.first_name;
+          payload.last_name = form.last_name;
+          payload.email = form.email;
+          payload.numero_telephone = form.numero_telephone;
+          if (form.password) payload.password = form.password;
+        }
+
         if (editingUser.role === "superviseur" || form.role === "superviseur") {
           payload.permissions = selectedPermissions;
         }
+
         await apiPatch(`${endpoints.users}${editingUser.id}/`, payload);
         pushToast({ type: "success", title: "Utilisateur modifie", message: `${editingUser.username} mis a jour` });
         closeForm();
         fetchUsers();
       } else {
+        const payload = { ...form };
         await apiPost(endpoints.users, payload);
         closeForm();
         fetchUsers();
-        // Afficher le modal de partage des identifiants
         setCreatedCredentials({
           username: form.username,
           password: form.password,
@@ -216,15 +240,21 @@ export default function GestionUtilisateurs() {
     }
   };
 
-  const handleDelete = async (u) => {
+  const handleDelete = (u) => {
     if (u.id === currentUser?.id) return;
-    if (!window.confirm(`Supprimer le compte de ${u.username} ? Cette action est irreversible.`)) return;
+    setDeleteConfirm(u);
+  };
+
+  const confirmDelete = async () => {
+    if (!deleteConfirm) return;
     try {
-      await apiDelete(`${endpoints.users}${u.id}/`);
-      pushToast({ type: "success", title: "Compte supprime", message: u.username });
+      await apiDelete(`${endpoints.users}${deleteConfirm.id}/`);
+      pushToast({ type: "success", title: "Compte supprime", message: deleteConfirm.username });
       fetchUsers();
     } catch {
       pushToast({ type: "error", title: "Erreur", message: "Suppression impossible" });
+    } finally {
+      setDeleteConfirm(null);
     }
   };
 
@@ -275,7 +305,7 @@ export default function GestionUtilisateurs() {
                       {ROLE_LABELS[u.role] || u.role}
                     </span>
                   </td>
-                  <td style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
+                  <td style={{ display: "flex", gap: 6, flexWrap: "nowrap", alignItems: "center", whiteSpace: "nowrap" }}>
                     <span className={`badge ${u.is_active ? "badge-success" : "badge-danger"}`}>
                       {u.is_active ? "Actif" : "Desactive"}
                     </span>
@@ -286,6 +316,14 @@ export default function GestionUtilisateurs() {
                     )}
                   </td>
                   <td className="actions-cell">
+                    {u.role === "superviseur" && u.superviseur_id && (
+                      <button
+                        className="btn btn-sm btn-secondary"
+                        onClick={() => navigate(`/superviseurs/${u.superviseur_id}`)}
+                      >
+                        Voir
+                      </button>
+                    )}
                     <button className="btn btn-sm btn-secondary" onClick={() => openEdit(u)}>
                       Modifier
                     </button>
@@ -344,77 +382,157 @@ export default function GestionUtilisateurs() {
                   </div>
                 )}
 
-                <div className="mfield">
-                  <label className="mfield-label">
-                    {editingUser ? "Nouveau mot de passe" : "Mot de passe temporaire"}{" "}
-                    {!editingUser && <span className="req">*</span>}
-                  </label>
-                  <input
-                    className={`mfield-input${errors.password ? " mfield-input--error" : ""}`}
-                    type="password"
-                    name="password"
-                    value={form.password}
-                    onChange={handleChange}
-                    placeholder={editingUser ? "Laisser vide pour ne pas changer" : "Min. 6 caracteres"}
-                    autoComplete="new-password"
-                  />
-                  {errors.password && <span className="mfield-error">{errors.password}</span>}
-                </div>
+                {!editingUser ? (
+                  /* Creation : mot de passe temporaire requis */
+                  <div className="mfield">
+                    <label className="mfield-label">Mot de passe temporaire <span className="req">*</span></label>
+                    <input
+                      className={`mfield-input${errors.password ? " mfield-input--error" : ""}`}
+                      type="password"
+                      name="password"
+                      value={form.password}
+                      onChange={handleChange}
+                      placeholder="Min. 6 caracteres"
+                      autoComplete="new-password"
+                    />
+                    {errors.password && <span className="mfield-error">{errors.password}</span>}
+                  </div>
+                ) : accountOwned ? (
+                  /* Edition compte possédé : section réinitialisation uniquement */
+                  <div style={{ background: "#fff8e1", border: "1px solid #ffe082", borderRadius: 6, padding: "12px 14px", marginBottom: 8 }}>
+                    <p style={{ fontSize: 12, color: "#795548", fontWeight: 700, marginBottom: 4 }}>
+                      Reinitialiser le mot de passe
+                    </p>
+                    <p style={{ fontSize: 11, color: "#888", marginBottom: 10, lineHeight: 1.5 }}>
+                      Ce compte est gere par son titulaire. Seule la reinitialisation du mot de passe est autorisee.
+                      Le superviseur devra le changer a sa prochaine connexion.
+                    </p>
+                    <div className="mfield" style={{ marginBottom: 0 }}>
+                      <label className="mfield-label">Nouveau mot de passe temporaire</label>
+                      <input
+                        className={`mfield-input${errors.resetPwd ? " mfield-input--error" : ""}`}
+                        type="password"
+                        value={resetPwd}
+                        onChange={(e) => {
+                          setResetPwd(e.target.value);
+                          if (errors.resetPwd) setErrors((p) => ({ ...p, resetPwd: null }));
+                        }}
+                        placeholder="Laisser vide pour ne pas reinitialiser"
+                        autoComplete="new-password"
+                      />
+                      {errors.resetPwd && <span className="mfield-error">{errors.resetPwd}</span>}
+                    </div>
+                  </div>
+                ) : (
+                  /* Edition compte non encore pris en main : changement optionnel */
+                  <div className="mfield">
+                    <label className="mfield-label">Nouveau mot de passe</label>
+                    <input
+                      className={`mfield-input${errors.password ? " mfield-input--error" : ""}`}
+                      type="password"
+                      name="password"
+                      value={form.password}
+                      onChange={handleChange}
+                      placeholder="Laisser vide pour ne pas changer"
+                      autoComplete="new-password"
+                    />
+                    {errors.password && <span className="mfield-error">{errors.password}</span>}
+                  </div>
+                )}
 
                 {/* Identite */}
                 <div className="modal-section-label" style={{ marginTop: 8 }}>Identite</div>
 
-                <div className="mfield-row">
-                  <div className="mfield">
-                    <label className="mfield-label">Prenom</label>
-                    <input
-                      className="mfield-input"
-                      name="first_name"
-                      value={form.first_name}
-                      onChange={handleChange}
-                      placeholder="Prenom"
-                    />
+                {accountOwned ? (
+                  /* Compte possédé : lecture seule */
+                  <div style={{ background: "#f5f5f5", border: "1px dashed #ccc", borderRadius: 6, padding: "10px 14px", marginBottom: 8 }}>
+                    <p style={{ fontSize: 11, color: "#888", marginBottom: 8 }}>
+                      Gere par le titulaire via son profil — lecture seule.
+                    </p>
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+                      <div>
+                        <div style={{ fontSize: 11, color: "#aaa", marginBottom: 2 }}>Prenom</div>
+                        <div style={{ fontWeight: 600, fontSize: 13 }}>{editingUser.first_name || "—"}</div>
+                      </div>
+                      <div>
+                        <div style={{ fontSize: 11, color: "#aaa", marginBottom: 2 }}>Nom</div>
+                        <div style={{ fontWeight: 600, fontSize: 13 }}>{editingUser.last_name || "—"}</div>
+                      </div>
+                    </div>
                   </div>
-                  <div className="mfield">
-                    <label className="mfield-label">Nom</label>
-                    <input
-                      className="mfield-input"
-                      name="last_name"
-                      value={form.last_name}
-                      onChange={handleChange}
-                      placeholder="Nom de famille"
-                    />
+                ) : (
+                  <div className="mfield-row">
+                    <div className="mfield">
+                      <label className="mfield-label">Prenom</label>
+                      <input
+                        className="mfield-input"
+                        name="first_name"
+                        value={form.first_name}
+                        onChange={handleChange}
+                        placeholder="Prenom"
+                      />
+                    </div>
+                    <div className="mfield">
+                      <label className="mfield-label">Nom</label>
+                      <input
+                        className="mfield-input"
+                        name="last_name"
+                        value={form.last_name}
+                        onChange={handleChange}
+                        placeholder="Nom de famille"
+                      />
+                    </div>
                   </div>
-                </div>
+                )}
 
                 {/* Contact */}
-                <div className="modal-section-label" style={{ marginTop: 8 }}>Contact (pour envoi des identifiants)</div>
+                <div className="modal-section-label" style={{ marginTop: 8 }}>Contact</div>
 
-                <div className="mfield">
-                  <label className="mfield-label">Numero WhatsApp</label>
-                  <input
-                    className="mfield-input"
-                    name="numero_telephone"
-                    value={form.numero_telephone}
-                    onChange={handleChange}
-                    placeholder="ex: 07 12 34 56 78"
-                  />
-                  <small className="mfield-hint">&#128241; Utilisé pour envoyer les identifiants via WhatsApp</small>
-                </div>
-
-                <div className="mfield">
-                  <label className="mfield-label">Adresse email</label>
-                  <input
-                    className={`mfield-input${errors.email ? " mfield-input--error" : ""}`}
-                    type="email"
-                    name="email"
-                    value={form.email}
-                    onChange={handleChange}
-                    placeholder="ex: superviseur@example.com"
-                  />
-                  <small className="mfield-hint">&#9993; Utilisé pour envoyer les identifiants par email</small>
-                  {errors.email && <span className="mfield-error">{errors.email}</span>}
-                </div>
+                {accountOwned ? (
+                  /* Compte possédé : lecture seule */
+                  <div style={{ background: "#f5f5f5", border: "1px dashed #ccc", borderRadius: 6, padding: "10px 14px", marginBottom: 8 }}>
+                    <p style={{ fontSize: 11, color: "#888", marginBottom: 8 }}>
+                      Gere par le titulaire — lecture seule.
+                    </p>
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+                      <div>
+                        <div style={{ fontSize: 11, color: "#aaa", marginBottom: 2 }}>WhatsApp</div>
+                        <div style={{ fontWeight: 600, fontSize: 13 }}>{editingUser.numero_telephone || "—"}</div>
+                      </div>
+                      <div>
+                        <div style={{ fontSize: 11, color: "#aaa", marginBottom: 2 }}>Email</div>
+                        <div style={{ fontWeight: 600, fontSize: 13 }}>{editingUser.email || "—"}</div>
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  <>
+                    <div className="mfield">
+                      <label className="mfield-label">Numero WhatsApp</label>
+                      <input
+                        className="mfield-input"
+                        name="numero_telephone"
+                        value={form.numero_telephone}
+                        onChange={handleChange}
+                        placeholder="ex: 07 12 34 56 78"
+                      />
+                      <small className="mfield-hint">&#128241; Utilise pour envoyer les identifiants via WhatsApp</small>
+                    </div>
+                    <div className="mfield">
+                      <label className="mfield-label">Adresse email</label>
+                      <input
+                        className={`mfield-input${errors.email ? " mfield-input--error" : ""}`}
+                        type="email"
+                        name="email"
+                        value={form.email}
+                        onChange={handleChange}
+                        placeholder="ex: superviseur@example.com"
+                      />
+                      <small className="mfield-hint">&#9993; Utilise pour envoyer les identifiants par email</small>
+                      {errors.email && <span className="mfield-error">{errors.email}</span>}
+                    </div>
+                  </>
+                )}
 
                 {/* Role */}
                 <div className="modal-section-label" style={{ marginTop: 8 }}>Role</div>
@@ -501,6 +619,36 @@ export default function GestionUtilisateurs() {
           credentials={createdCredentials}
           onClose={() => setCreatedCredentials(null)}
         />
+      )}
+
+      {/* Dialog confirmation suppression */}
+      {deleteConfirm && (
+        <div className="modal-overlay" onClick={() => setDeleteConfirm(null)}>
+          <div className="modal" style={{ maxWidth: 420 }} onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <h2>Supprimer le compte</h2>
+              <button className="btn-ghost btn-mini" onClick={() => setDeleteConfirm(null)}>✕</button>
+            </div>
+            <div className="modal-body">
+              <p style={{ fontSize: 14, color: "#555", marginBottom: 8 }}>
+                Vous allez supprimer le compte de{" "}
+                <strong>{[deleteConfirm.first_name, deleteConfirm.last_name].filter(Boolean).join(" ") || deleteConfirm.username}</strong>
+                {" "}(<code>{deleteConfirm.username}</code>).
+              </p>
+              <p style={{ fontSize: 13, color: "#c62828", fontWeight: 600 }}>
+                Cette action est irreversible. Toutes les donnees liees a ce compte seront conservees mais le compte sera supprime.
+              </p>
+            </div>
+            <div className="modal-footer" style={{ display: "flex", justifyContent: "flex-end", gap: 10 }}>
+              <button className="btn btn-secondary" onClick={() => setDeleteConfirm(null)}>
+                Annuler
+              </button>
+              <button className="btn btn-danger" onClick={confirmDelete}>
+                Supprimer
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );
