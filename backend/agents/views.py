@@ -19,6 +19,15 @@ _AGENT_LABELS = {
     "actif":     "Actif",
 }
 
+_SUP_LABELS = {
+    "nom":       "Nom",
+    "prenom":    "Prénom",
+    "code":      "Code",
+    "matricule": "Matricule",
+    "telephone": "Téléphone",
+    "actif":     "Actif",
+}
+
 
 def _agent_snapshot(inst):
     snap = snapshot(inst, _AGENT_LABELS)
@@ -79,6 +88,44 @@ class SuperviseurGeneralViewSet(viewsets.ModelViewSet):
 
     def get_permissions(self):
         return [IsAuthenticated()]
+
+    def create(self, request, *args, **kwargs):
+        response = super().create(request, *args, **kwargs)
+        if response.status_code in (200, 201):
+            try:
+                inst = SuperviseurGeneral.objects.get(pk=response.data["id"])
+                snap = snapshot(inst, _SUP_LABELS)
+            except Exception:
+                snap = {}
+            nom = f"{response.data.get('nom', '')} {response.data.get('prenom', '')}".strip()
+            log_action(request.user, "creation_superviseur_general",
+                       detail=f"Superviseur général « {nom} » créé.",
+                       meta={"snapshot": snap})
+        return response
+
+    def partial_update(self, request, *args, **kwargs):
+        instance = self.get_object()
+        pk = instance.pk
+        before = snapshot(instance, _SUP_LABELS)
+        response = super().partial_update(request, *args, **kwargs)
+        if response.status_code == 200:
+            fresh = SuperviseurGeneral.objects.get(pk=pk)
+            after = snapshot(fresh, _SUP_LABELS)
+            changes = diff_fields(before, after)
+            nom = f"{fresh.nom} {fresh.prenom}".strip()
+            log_action(request.user, "modification_superviseur_general",
+                       detail=f"Superviseur général « {nom} » modifié.",
+                       meta={"changes": changes})
+        return response
+
+    def destroy(self, request, *args, **kwargs):
+        instance = self.get_object()
+        snap = snapshot(instance, _SUP_LABELS)
+        nom = f"{instance.nom} {instance.prenom}".strip()
+        log_action(request.user, "suppression_superviseur_general",
+                   detail=f"Superviseur général « {nom} » supprimé.",
+                   meta={"snapshot": snap})
+        return super().destroy(request, *args, **kwargs)
 
     @action(detail=True, methods=["get"], url_path="stats")
     def stats(self, request, pk=None):

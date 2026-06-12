@@ -9,7 +9,7 @@ from rest_framework.decorators import action
 from rest_framework.response import Response
 
 from utils.permissions import IsAdmin
-from utils.audit import log_action
+from utils.audit import log_action, snapshot, diff_fields
 from accounts.utils import create_notification
 from .models import FicheTravaux
 from .serializers import FicheTravauxSerializer
@@ -33,16 +33,21 @@ def _style_header(ws, headers, fill_color="1F4E79"):
     ws.auto_filter.ref = ws.dimensions
 
 
-def _notify_statut_travaux(instance, old_statut, new_statut):
+def _notify_statut_travaux(instance, old_statut, new_statut, actor=None):
     if not new_statut or new_statut == old_statut or not instance.created_by:
+        return
+    # Ne pas notifier le superviseur d'une action qu'il a lui-même effectuée
+    if actor and actor.pk == instance.created_by.pk:
         return
     ref = str(instance.periode_travaux) if instance.periode_travaux else f"#{instance.id}"
     if new_statut == "valide":
         create_notification(instance.created_by,
-                            f"Votre fiche de travaux ({ref}) a ete validee.", "success", "/travaux")
-    elif new_statut == "brouillon" and old_statut == "soumis":
+                            f"Votre fiche de travaux ({ref}) a ete validee.", "success",
+                            "/travaux?tab=historique")
+    elif new_statut == "brouillon" and old_statut in ("soumis", "valide"):
         create_notification(instance.created_by,
-                            f"Votre fiche de travaux ({ref}) a ete rejetee.", "warning", "/travaux")
+                            f"Votre fiche de travaux ({ref}) a ete rejetee.", "warning",
+                            f"/mon-audit?action=rejet_travaux&fiche_id={instance.id}")
 
 
 def _is_admin(user):
@@ -52,33 +57,78 @@ def _is_admin(user):
         return False
 
 
+_TRAVAUX_LABELS = {
+    "superviseur_travaux":    "Superviseur",
+    "nature_travaux":         "Nature des travaux",
+    "periode_travaux":        "Période",
+    "superficie_couverte_ha": "Superficie (ha)",
+    "nb_personnes":           "Nombre de personnes",
+    "observations":           "Observations",
+    "statut":                 "Statut",
+    "statut_avancement":      "Statut avancement",
+}
+
+
 class FicheTravauxViewSet(viewsets.ModelViewSet):
     serializer_class = FicheTravauxSerializer
 
     def get_queryset(self):
+        from django.db.models import Q
+        from agents.models import SuperviseurGeneral
+
         qs = FicheTravaux.objects.prefetch_related(
             "secteurs_couverts", "consommables", "repartitions"
         ).order_by("-id")
         if not _is_admin(self.request.user):
-            qs = qs.filter(created_by=self.request.user)
+            q = Q(created_by=self.request.user)
+            try:
+                sup = SuperviseurGeneral.objects.get(user=self.request.user)
+                if sup.nom:
+                    q |= Q(superviseur_travaux__iexact=sup.nom)
+            except SuperviseurGeneral.DoesNotExist:
+                pass
+            qs = qs.filter(q)
         return qs
 
     def perform_create(self, serializer):
+        if _is_admin(self.request.user):
+            from rest_framework.exceptions import PermissionDenied
+            raise PermissionDenied("L'administrateur ne peut pas créer de fiche travaux. Cette action est réservée aux superviseurs.")
         serializer.save(created_by=self.request.user)
 
     def create(self, request, *args, **kwargs):
         response = super().create(request, *args, **kwargs)
         if response.status_code in (200, 201):
             ref = response.data.get("periode_travaux") or f"#{response.data.get('id', '')}"
+            snap = {
+                "Superviseur": str(response.data.get("superviseur_travaux", "") or ""),
+                "Nature des travaux": str(response.data.get("nature_travaux", "") or ""),
+                "Période": str(response.data.get("periode_travaux", "") or ""),
+                "Superficie (ha)": str(response.data.get("superficie_couverte_ha", "") or ""),
+                "Nombre de personnes": str(response.data.get("nb_personnes", "") or ""),
+                "Observations": str(response.data.get("observations", "") or ""),
+            }
             log_action(request.user, "creation_travaux",
-                       detail=f"Fiche travaux ({ref}) créée.")
+                       detail=f"Fiche travaux ({ref}) créée.",
+                       meta={"snapshot": snap},
+                       superviseur=request.user if not _is_admin(request.user) else None)
         return response
 
     def destroy(self, request, *args, **kwargs):
         instance = self.get_object()
         ref = str(instance.periode_travaux) if instance.periode_travaux else f"#{instance.pk}"
+        snap = {
+            "Superviseur": instance.superviseur_travaux or "",
+            "Nature des travaux": instance.get_nature_travaux_display() if instance.nature_travaux else "",
+            "Période": instance.periode_travaux or "",
+            "Superficie (ha)": str(instance.superficie_couverte_ha) if instance.superficie_couverte_ha is not None else "",
+            "Statut": instance.get_statut_display(),
+            "Nombre de personnes": str(instance.nb_personnes) if instance.nb_personnes is not None else "",
+            "Observations": instance.observations or "",
+        }
         log_action(request.user, "suppression_travaux",
-                   detail=f"Fiche travaux ({ref}) supprimée.")
+                   detail=f"Fiche travaux ({ref}) supprimée.",
+                   meta={"snapshot": snap})
         return super().destroy(request, *args, **kwargs)
 
     def get_permissions(self):
@@ -89,8 +139,12 @@ class FicheTravauxViewSet(viewsets.ModelViewSet):
     def _check_statut_transition(self, request, instance=None):
         new_statut = request.data.get("statut")
         is_admin = _is_admin(request.user)
-        if new_statut == "valide" and not is_admin:
-            return Response({"detail": "Seul l'administrateur peut valider une fiche."}, status=403)
+        is_creator = instance and instance.created_by_id == request.user.id
+        if new_statut == "valide" and not is_creator:
+            return Response(
+                {"detail": "Seul le créateur de la fiche peut la valider."},
+                status=403,
+            )
         if instance and instance.statut == "valide" and not is_admin:
             return Response({"detail": "Seul l'administrateur peut modifier une fiche validée."}, status=403)
         if instance and instance.statut == "valide" and is_admin:
@@ -105,14 +159,71 @@ class FicheTravauxViewSet(viewsets.ModelViewSet):
             return err
         old_statut = instance.statut
         new_statut = request.data.get("statut")
-        response = super().partial_update(request, *args, **kwargs)
-        if response.status_code == 200 and new_statut and new_statut != old_statut:
-            ref = str(instance.periode_travaux) if instance.periode_travaux else f"#{instance.pk}"
+        before = snapshot(instance, _TRAVAUX_LABELS)
+
+        # Directly serialize + save to avoid calling self.update() which would double-log.
+        serializer = self.get_serializer(instance, data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        self.perform_update(serializer)
+        if getattr(instance, "_prefetched_objects_cache", None):
+            instance._prefetched_objects_cache = {}
+
+        # Stamp or clear validation metadata
+        if new_statut and new_statut != old_statut:
+            if new_statut == "valide":
+                instance.validated_by = request.user
+                instance.validated_at = timezone.now()
+                instance.save(update_fields=["validated_by", "validated_at"])
+            elif new_statut == "brouillon" and old_statut in ("soumis", "valide"):
+                instance.validated_by = None
+                instance.validated_at = None
+                instance.save(update_fields=["validated_by", "validated_at"])
+
+        ref = str(instance.periode_travaux) if instance.periode_travaux else f"#{instance.pk}"
+        instance.refresh_from_db()
+        after = snapshot(instance, _TRAVAUX_LABELS)
+        sup = instance.created_by
+
+        if new_statut and new_statut != old_statut:
+            transition_snap = {
+                "Superviseur": instance.superviseur_travaux or "",
+                "Nature des travaux": instance.get_nature_travaux_display() if instance.nature_travaux else "",
+                "Période": instance.periode_travaux or "",
+                "Statut précédent": old_statut,
+            }
             if new_statut == "soumis":
                 log_action(request.user, "soumission_travaux",
-                           detail=f"Fiche travaux ({ref}) soumise pour validation.")
-        _notify_statut_travaux(instance, old_statut, new_statut)
-        return response
+                           detail=f"Fiche travaux ({ref}) soumise pour validation.",
+                           meta={"snapshot": transition_snap}, superviseur=sup)
+            elif new_statut == "valide":
+                log_action(request.user, "validation_travaux",
+                           detail=f"Fiche travaux ({ref}) validée.",
+                           meta={"snapshot": transition_snap}, superviseur=sup)
+            elif new_statut == "brouillon" and old_statut in ("soumis", "valide"):
+                motif = (request.data.get("motif") or getattr(instance, "_audit_motif", "") or "").strip()
+                if motif:
+                    transition_snap["Motif"] = motif
+                detail_rejet = f"Fiche travaux ({ref}) rejetée."
+                if motif:
+                    detail_rejet += f" Motif : {motif}"
+                log_action(request.user, "rejet_travaux",
+                           detail=detail_rejet,
+                           meta={"snapshot": transition_snap, "motif": motif}, superviseur=sup)
+            else:
+                changes = diff_fields(before, after)
+                if changes:
+                    log_action(request.user, "modification_travaux",
+                               detail=f"Fiche travaux ({ref}) modifiée.",
+                               meta={"changes": changes}, superviseur=sup)
+        else:
+            changes = diff_fields(before, after)
+            if changes:
+                log_action(request.user, "modification_travaux",
+                           detail=f"Fiche travaux ({ref}) modifiée.",
+                           meta={"changes": changes}, superviseur=sup)
+
+        _notify_statut_travaux(instance, old_statut, new_statut, actor=request.user)
+        return Response(serializer.data)
 
     def update(self, request, *args, **kwargs):
         instance = self.get_object()
@@ -120,8 +231,37 @@ class FicheTravauxViewSet(viewsets.ModelViewSet):
         if err:
             return err
         old_statut = instance.statut
+        new_statut = request.data.get("statut")
+        before = snapshot(instance, _TRAVAUX_LABELS)
         response = super().update(request, *args, **kwargs)
-        _notify_statut_travaux(instance, old_statut, request.data.get("statut"))
+        if response.status_code == 200:
+            ref = str(instance.periode_travaux) if instance.periode_travaux else f"#{instance.pk}"
+            instance.refresh_from_db()
+            after = snapshot(instance, _TRAVAUX_LABELS)
+            sup = instance.created_by
+            snap_base = {"Superviseur": instance.superviseur_travaux or "",
+                         "Période": instance.periode_travaux or "",
+                         "Statut précédent": old_statut}
+            if new_statut and new_statut != old_statut and new_statut == "valide":
+                log_action(request.user, "validation_travaux",
+                           detail=f"Fiche travaux ({ref}) validée.",
+                           meta={"snapshot": snap_base}, superviseur=sup)
+            elif new_statut and new_statut != old_statut and new_statut == "brouillon" and old_statut in ("soumis", "valide"):
+                motif_u = (request.data.get("motif") or "").strip()
+                detail_u = f"Fiche travaux ({ref}) rejetée."
+                if motif_u:
+                    detail_u += f" Motif : {motif_u}"
+                    snap_base["Motif"] = motif_u
+                log_action(request.user, "rejet_travaux",
+                           detail=detail_u,
+                           meta={"snapshot": snap_base, "motif": motif_u}, superviseur=sup)
+            else:
+                changes = diff_fields(before, after)
+                if changes:
+                    log_action(request.user, "modification_travaux",
+                               detail=f"Fiche travaux ({ref}) modifiée.",
+                               meta={"changes": changes}, superviseur=sup)
+        _notify_statut_travaux(instance, old_statut, new_statut, actor=request.user)
         return response
 
     @action(detail=False, methods=["get"], url_path="export")

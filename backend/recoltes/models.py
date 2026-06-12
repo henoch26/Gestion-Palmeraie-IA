@@ -204,15 +204,18 @@ class FicheRecuVente(models.Model):
 
     @property
     def prix_calcule(self):
-        if self.pesee_kg and float(self.pesee_kg) > 0:
-            return round(float(self.montant) / float(self.pesee_kg), 2)
+        from decimal import Decimal, ROUND_HALF_UP
+        if self.pesee_kg and self.pesee_kg > 0:
+            result = self.montant / self.pesee_kg
+            return float(result.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP))
         return None
 
     @property
     def rapport_prix(self):
+        from decimal import Decimal
         pc = self.prix_calcule
-        if pc and self.prix_officiel and float(self.prix_officiel) > 0:
-            return round(pc / float(self.prix_officiel), 4)
+        if pc and self.prix_officiel and self.prix_officiel > 0:
+            return round(Decimal(str(pc)) / self.prix_officiel, 4)
         return None
 
 
@@ -225,6 +228,8 @@ class ParametreBonus(models.Model):
     # Bonus qualité régimes non conformes
     seuil_non_conformes = models.DecimalField(max_digits=5, decimal_places=2, default=5)
     montant_bonus = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    # Prix officiel du kg fixé par les acteurs agro-industriels
+    prix_kg_officiel = models.DecimalField(max_digits=12, decimal_places=2, null=True, blank=True)
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
@@ -248,9 +253,11 @@ class ActionLog(models.Model):
         ("modification_fiche",      "Modification fiche"),
         ("modification_bareme",     "Modification barème"),
         ("prix_officiel",           "Saisie/modif prix officiel"),
+        ("creation_recu",           "Création reçu de vente"),
         ("modification_recu",       "Modification reçu de vente"),
         ("suppression_recu",        "Suppression reçu de vente"),
         ("validation_recu",         "Validation reçu de vente"),
+        ("rejet_recu",              "Rejet reçu de vente"),
         # ── Actions superviseur — fiches & récolteurs ──────────────
         ("creation_fiche",          "Création fiche récolte"),
         ("soumission_fiche",        "Soumission fiche récolte"),
@@ -268,12 +275,31 @@ class ActionLog(models.Model):
         ("creation_materiel",       "Création matériel"),
         ("modification_materiel",   "Modification matériel"),
         ("suppression_materiel",    "Suppression matériel"),
+        # ── Clients ────────────────────────────────────────────────
+        ("creation_client",         "Création client"),
+        ("modification_client",     "Modification client"),
+        ("suppression_client",      "Suppression client"),
+        # ── Superviseurs généraux ──────────────────────────────────
+        ("creation_superviseur_general",     "Création superviseur général"),
+        ("modification_superviseur_general", "Modification superviseur général"),
+        ("suppression_superviseur_general",  "Suppression superviseur général"),
+        # ── Comptes utilisateurs ───────────────────────────────────
+        ("creation_utilisateur",     "Création compte utilisateur"),
+        ("modification_utilisateur", "Modification compte utilisateur"),
+        ("suppression_utilisateur",  "Suppression compte utilisateur"),
         # ── Fiches travaux ─────────────────────────────────────────
-        ("creation_travaux",        "Création fiche travaux"),
-        ("soumission_travaux",      "Soumission fiche travaux"),
-        ("suppression_travaux",     "Suppression fiche travaux"),
+        ("creation_travaux",         "Création fiche travaux"),
+        ("modification_travaux",     "Modification fiche travaux"),
+        ("soumission_travaux",       "Soumission fiche travaux"),
+        ("validation_travaux",       "Validation fiche travaux"),
+        ("rejet_travaux",            "Rejet fiche travaux"),
+        ("suppression_travaux",      "Suppression fiche travaux"),
+        # ── Matériel utilisé dans les travaux ─────────────────────
+        ("creation_materiel_travaux",     "Ajout matériel dans travaux"),
+        ("modification_materiel_travaux", "Modification matériel dans travaux"),
+        ("suppression_materiel_travaux",  "Retrait matériel dans travaux"),
         # ── Annulations admin ──────────────────────────────────────
-        ("annulation_action",       "Annulation d'action superviseur"),
+        ("annulation_action",        "Annulation d'action superviseur"),
     ]
 
     acteur = models.ForeignKey(

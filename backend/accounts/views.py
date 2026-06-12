@@ -10,7 +10,8 @@ from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 
 from utils.permissions import IsAdmin
-from .models import Notification, UserProfile, AuditLog, Droit
+from utils.audit import log_action
+from .models import Notification, PasswordResetToken, UserProfile, AuditLog, Droit
 from .serializers import CreateUserSerializer, DroitSerializer, ProfileSerializer, UpdateUserSerializer, UserListSerializer, AuditLogSerializer
 
 
@@ -94,6 +95,74 @@ def profile_view(request):
     return Response({"user": _user_payload(user)})
 
 
+@api_view(["POST"])
+@permission_classes([AllowAny])
+def forgot_password_view(request):
+    identifier = (request.data.get("email") or "").strip()
+    if not identifier:
+        return Response({"detail": "Identifiant ou email requis."}, status=400)
+
+    user = None
+    if "@" in identifier:
+        user = User.objects.filter(email__iexact=identifier).first()
+    if not user:
+        user = User.objects.filter(username__iexact=identifier).first()
+
+    if user and user.email:
+        token_obj = PasswordResetToken.create_for_user(user)
+        frontend_url = os.environ.get("FRONTEND_URL", "http://localhost:5173").rstrip("/")
+        reset_url = f"{frontend_url}/reset-password?token={token_obj.token}"
+        try:
+            send_mail(
+                subject="Réinitialisation de votre mot de passe Palmeraie",
+                message=(
+                    f"Bonjour {user.first_name or user.username},\n\n"
+                    f"Vous avez demandé la réinitialisation de votre mot de passe.\n\n"
+                    f"Cliquez sur ce lien pour définir un nouveau mot de passe (valable 1 heure) :\n"
+                    f"{reset_url}\n\n"
+                    f"Si vous n'avez pas fait cette demande, ignorez cet email.\n\n"
+                    f"Cordialement,\nL'équipe Palmeraie"
+                ),
+                from_email=django_settings.DEFAULT_FROM_EMAIL,
+                recipient_list=[user.email],
+                fail_silently=True,
+            )
+        except Exception:
+            pass
+
+    # Toujours 200 — ne pas révéler si le compte existe
+    return Response({"detail": "Si un compte correspond, un email de réinitialisation a été envoyé."})
+
+
+@api_view(["POST"])
+@permission_classes([AllowAny])
+def reset_password_view(request):
+    token_value = (request.data.get("token") or "").strip()
+    new_password = (request.data.get("password") or "").strip()
+
+    if not token_value or not new_password:
+        return Response({"detail": "Token et nouveau mot de passe requis."}, status=400)
+    if len(new_password) < 6:
+        return Response({"detail": "Le mot de passe doit contenir au moins 6 caractères."}, status=400)
+
+    try:
+        token_obj = PasswordResetToken.objects.select_related("user").get(token=token_value)
+    except PasswordResetToken.DoesNotExist:
+        return Response({"detail": "Lien invalide ou déjà utilisé."}, status=400)
+
+    if not token_obj.is_valid():
+        return Response({"detail": "Lien expiré. Faites une nouvelle demande."}, status=400)
+
+    user = token_obj.user
+    user.set_password(new_password)
+    user.save()
+    token_obj.used = True
+    token_obj.save(update_fields=["used"])
+    Token.objects.filter(user=user).delete()
+
+    return Response({"detail": "Mot de passe réinitialisé. Vous pouvez vous connecter."})
+
+
 @api_view(["GET"])
 @permission_classes([AllowAny])
 def health_view(request):
@@ -171,6 +240,16 @@ def users_list_create(request):
         except Exception:
             pass
 
+    snap = {
+        "Nom d'utilisateur": user.username,
+        "Prénom": user.first_name or "",
+        "Nom": user.last_name or "",
+        "Email": user.email or "",
+        "Rôle": getattr(getattr(user, "profile", None), "role", ""),
+    }
+    log_action(request.user, "creation_utilisateur",
+               detail=f"Compte « {user.username} » créé.",
+               meta={"snapshot": snap})
     return Response(UserListSerializer(user).data, status=201)
 
 
@@ -228,11 +307,52 @@ def users_detail(request, pk):
         if is_password_reset:
             Token.objects.filter(user=user).delete()
 
+        # ── Audit ──────────────────────────────────────────────────────
+        _USER_LABELS = {
+            "username":    "Nom d'utilisateur",
+            "first_name":  "Prénom",
+            "last_name":   "Nom",
+            "email":       "Email",
+            "role":        "Rôle",
+            "is_active":   "Actif",
+            "permissions": "Permissions",
+        }
+        changes = []
+        for field, label in _USER_LABELS.items():
+            if field in request.data:
+                if field == "password":
+                    continue  # ne pas loguer le mot de passe
+                old_val = getattr(user, field, None)
+                if field == "role":
+                    old_val = getattr(getattr(user, "profile", None), "role", None)
+                elif field == "is_active":
+                    old_val = user.is_active
+                elif field == "permissions":
+                    old_val = sorted(user.profile.droits.values_list("code", flat=True)) if hasattr(user, "profile") else []
+                new_val = request.data[field]
+                if str(old_val or "") != str(new_val or ""):
+                    changes.append({"field": label, "old": str(old_val or ""), "new": str(new_val or "")})
+        if is_password_reset:
+            changes.append({"field": "Mot de passe", "old": "***", "new": "réinitialisé par l'admin"})
+        user.refresh_from_db()
+        log_action(request.user, "modification_utilisateur",
+                   detail=f"Compte « {user.username} » modifié.",
+                   meta={"changes": changes})
         return Response(UserListSerializer(user).data)
 
     if request.method == "DELETE":
         if user == request.user:
             return Response({"detail": "Impossible de supprimer votre propre compte"}, status=400)
+        snap = {
+            "Nom d'utilisateur": user.username,
+            "Prénom": user.first_name or "",
+            "Nom": user.last_name or "",
+            "Email": user.email or "",
+            "Rôle": getattr(getattr(user, "profile", None), "role", ""),
+        }
+        log_action(request.user, "suppression_utilisateur",
+                   detail=f"Compte « {user.username} » supprimé.",
+                   meta={"snapshot": snap})
         user.delete()
         return Response(status=204)
 

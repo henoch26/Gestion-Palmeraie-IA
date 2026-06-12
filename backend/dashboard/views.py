@@ -134,31 +134,7 @@ def summary_view(request):
     )
     poids_moyen_regime = round(total_kg / float(total_production), 3) if total_production else 0
 
-    # Dépenses récolte — champs saisis manuellement sur chaque fiche
-    qs_year = fiches_recolte_qs.filter(date__year=selected_year)
-    dep_nourriture = float(qs_year.aggregate(t=Sum("depense_nourriture"))["t"] or 0)
-    dep_transport  = float(qs_year.aggregate(t=Sum("depense_transport"))["t"] or 0)
-    dep_salaires   = float(qs_year.aggregate(t=Sum("depense_salaire"))["t"] or 0)
-    depenses_total_recolte = dep_nourriture + dep_transport
-    depenses_totales = dep_nourriture + dep_transport + dep_salaires
-
-    # KPIs financiers supplémentaires
-    nb_ventes = FicheRecuVente.objects.filter(
-        fiche__in=fiches_recolte_qs, date__isnull=False, date__year=selected_year
-    ).count()
-    ca_mois = float(
-        FicheRecuVente.objects.filter(
-            fiche__in=fiches_recolte_qs, date__isnull=False,
-            date__year=today.year, date__month=today.month,
-        ).aggregate(t=Sum("montant"))["t"] or 0
-    )
-    prix_moyen_kg = round(float(montant_total_ventes) / total_kg, 0) if total_kg else 0
-    cout_moyen_kg = round(depenses_totales / total_kg, 0) if total_kg else 0
-    benefice = float(montant_total_ventes) - depenses_totales
-    marge_pct = round(benefice / float(montant_total_ventes) * 100, 1) if float(montant_total_ventes) else 0
-    rendement_kg_ha = round(total_kg / superficie_totale, 2) if superficie_totale else 0
-
-    # Coûts travaux
+    # Coûts travaux (calculés en premier pour alimenter depenses_totales)
     cost_expr = ExpressionWrapper(
         F("quantite") * F("prix_unitaire"),
         output_field=DecimalField(max_digits=20, decimal_places=2),
@@ -176,6 +152,35 @@ def summary_view(request):
         .aggregate(total=Sum(cost_expr))["total"] or 0
     )
     cout_total_travaux = total_consommables + total_taches
+
+    # Dépenses récolte
+    qs_year = fiches_recolte_qs.filter(date__year=selected_year)
+    dep_nourriture = float(qs_year.aggregate(t=Sum("depense_nourriture"))["t"] or 0)
+    dep_transport  = float(qs_year.aggregate(t=Sum("depense_transport"))["t"] or 0)
+    from recoltes.models import FicheRecolteLigne as _LigneYear
+    dep_salaires = float(
+        _LigneYear.objects.filter(fiche__in=qs_year)
+        .aggregate(t=Sum("salaire_calcule"))["t"] or 0
+    )
+    depenses_total_recolte = dep_nourriture + dep_transport + dep_salaires
+    # Dépenses totales d'exploitation = récolte + travaux
+    depenses_totales = depenses_total_recolte + cout_total_travaux
+
+    # KPIs financiers supplémentaires
+    nb_ventes = FicheRecuVente.objects.filter(
+        fiche__in=fiches_recolte_qs, date__isnull=False, date__year=selected_year
+    ).count()
+    ca_mois = float(
+        FicheRecuVente.objects.filter(
+            fiche__in=fiches_recolte_qs, date__isnull=False,
+            date__year=selected_year, date__month=today.month,
+        ).aggregate(t=Sum("montant"))["t"] or 0
+    )
+    prix_moyen_kg = round(float(montant_total_ventes) / total_kg, 0) if total_kg else 0
+    cout_moyen_kg = round(depenses_totales / total_kg, 0) if total_kg else 0
+    benefice = float(montant_total_ventes) - depenses_totales
+    marge_pct = round(benefice / float(montant_total_ventes) * 100, 1) if float(montant_total_ventes) else 0
+    rendement_kg_ha = round(total_kg / superficie_totale, 2) if superficie_totale else 0
 
     fiches_recolte_count = fiches_recolte_qs.filter(date__year=selected_year).count()
     fiches_travaux_count = travaux_qs.filter(created_at__year=selected_year).count()
@@ -336,37 +341,57 @@ def summary_view(request):
         rendement_values_6m.append(round(float(v6) / sup, 4) if sup else 0)
         rendement_values_prev.append(round(float(vp) / sup, 4) if sup else 0)
 
-    # Dépenses mensuelles
+    # Dépenses mensuelles (nourriture + transport + salaires récolteurs)
     zero_money = Value(0, output_field=DecimalField(max_digits=12, decimal_places=2))
-    dep_qs = (
-        fiches_recolte_qs.filter(date__year=selected_year)
-        .values("date__month")
-        .annotate(
-            nourriture=Coalesce(Sum("depense_nourriture"), zero_money),
-            transport=Coalesce(Sum("depense_transport"), zero_money),
-        )
-    )
-    dep_by_month = {r["date__month"]: float(r["nourriture"] + r["transport"]) for r in dep_qs}
-    depenses_mensuelles = [dep_by_month.get(m, 0.0) for m in range(1, 13)]
+    from recoltes.models import FicheRecolteLigne as _LigneDep
 
-    dep_qs_prev = (
-        fiches_recolte_qs.filter(date__year=prev_year)
-        .values("date__month")
-        .annotate(
-            nourriture=Coalesce(Sum("depense_nourriture"), zero_money),
-            transport=Coalesce(Sum("depense_transport"), zero_money),
+    def _dep_mensuelle(fiches_qs, trav_qs, year):
+        # Récolte : nourriture + transport + salaires
+        dep_qs = (
+            fiches_qs.filter(date__year=year)
+            .values("date__month")
+            .annotate(
+                nourriture=Coalesce(Sum("depense_nourriture"), zero_money),
+                transport=Coalesce(Sum("depense_transport"), zero_money),
+            )
         )
-    )
-    dep_prev_by_month = {r["date__month"]: float(r["nourriture"] + r["transport"]) for r in dep_qs_prev}
-    depenses_prev = [dep_prev_by_month.get(m, 0.0) for m in range(1, 13)]
+        base = {r["date__month"]: float(r["nourriture"] + r["transport"]) for r in dep_qs}
+        sal_qs = (
+            _LigneDep.objects.filter(fiche__in=fiches_qs.filter(date__year=year))
+            .values("fiche__date__month")
+            .annotate(total=Sum("salaire_calcule"))
+        )
+        for r in sal_qs:
+            m = r["fiche__date__month"]
+            base[m] = base.get(m, 0.0) + float(r["total"] or 0)
+        # Travaux : consommables + tâches
+        for r in (ConsommableTravaux.objects
+                  .filter(fiche__in=trav_qs, fiche__created_at__year=year)
+                  .values("fiche__created_at__month").annotate(total=Sum(cost_expr))):
+            m = r["fiche__created_at__month"]
+            base[m] = base.get(m, 0.0) + float(r["total"] or 0)
+        for r in (RepartitionTache.objects
+                  .filter(fiche__in=trav_qs, fiche__created_at__year=year)
+                  .values("fiche__created_at__month").annotate(total=Sum(cost_expr))):
+            m = r["fiche__created_at__month"]
+            base[m] = base.get(m, 0.0) + float(r["total"] or 0)
+        return [base.get(m, 0.0) for m in range(1, 13)]
+
+    depenses_mensuelles = _dep_mensuelle(fiches_recolte_qs, travaux_qs, selected_year)
+    depenses_prev       = _dep_mensuelle(fiches_recolte_qs, travaux_qs, prev_year)
 
     dep_last6 = []
     for yy, mm, _ in last6:
-        row = fiches_recolte_qs.filter(date__year=yy, date__month=mm).aggregate(
+        fiches_m = fiches_recolte_qs.filter(date__year=yy, date__month=mm)
+        trav_m   = travaux_qs.filter(created_at__year=yy, created_at__month=mm)
+        row = fiches_m.aggregate(
             nourriture=Coalesce(Sum("depense_nourriture"), zero_money),
             transport=Coalesce(Sum("depense_transport"), zero_money),
         )
-        dep_last6.append(float((row.get("nourriture") or 0) + (row.get("transport") or 0)))
+        sal  = float(_LigneDep.objects.filter(fiche__in=fiches_m).aggregate(t=Sum("salaire_calcule"))["t"] or 0)
+        cons = float(ConsommableTravaux.objects.filter(fiche__in=trav_m).aggregate(t=Sum(cost_expr))["t"] or 0)
+        tach = float(RepartitionTache.objects.filter(fiche__in=trav_m).aggregate(t=Sum(cost_expr))["t"] or 0)
+        dep_last6.append(float((row.get("nourriture") or 0) + (row.get("transport") or 0)) + sal + cons + tach)
 
     # Dépenses par secteur et par type de régime
     def depenses_par_secteur(target_year):
@@ -431,9 +456,9 @@ def summary_view(request):
     prod_by_rec = (
         details_qs.filter(ligne__fiche__date__year=selected_year)
         .exclude(ligne__recolteur__isnull=True)
-        .values("ligne__recolteur", "ligne__recolteur__nom", "ligne__recolteur__numero_telephone", "ligne__recolteur_nom")
+        .values("ligne__recolteur", "ligne__recolteur__nom", "ligne__recolteur__numero_telephone")
         .annotate(total_regimes=Sum("quantite"))
-        .order_by("-total_regimes")[:20]
+        .order_by("-total_regimes")
     )
     salaire_qs = (
         _Ligne.objects.filter(fiche__date__year=selected_year, recolteur__isnull=False)
@@ -449,7 +474,7 @@ def summary_view(request):
         recolteurs_detail.append({
             "id": rid,
             "numero_telephone": r["ligne__recolteur__numero_telephone"] or "",
-            "nom": r["ligne__recolteur__nom"] or r["ligne__recolteur_nom"] or "N/A",
+            "nom": r["ligne__recolteur__nom"] or "N/A",
             "total_regimes": prod_r,
             "salaire_calcule": sal_map.get(rid, 0.0),
         })

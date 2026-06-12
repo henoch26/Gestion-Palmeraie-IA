@@ -234,11 +234,22 @@ class PersonnelViewSet(viewsets.ModelViewSet):
             )
             .exclude(secteur__isnull=True)
             .values("secteur__id", "secteur__code", "secteur__nom")
-            .annotate(total=Sum("quantite"))
+            .annotate(
+                total=Sum("quantite"),
+                grands=Coalesce(Sum("quantite", filter=Q(ligne__regime_type="grands")), 0),
+                moyens=Coalesce(Sum("quantite", filter=Q(ligne__regime_type="moyens")), 0),
+                petits=Coalesce(Sum("quantite", filter=Q(ligne__regime_type="petits")), 0),
+            )
             .order_by("-total")
         )
         secteurs = [
-            {"id": r["secteur__id"], "code": r["secteur__code"], "nom": r["secteur__nom"], "total_regimes": int(r["total"] or 0)}
+            {
+                "id": r["secteur__id"], "code": r["secteur__code"], "nom": r["secteur__nom"],
+                "total_regimes": int(r["total"] or 0),
+                "grands": int(r["grands"] or 0),
+                "moyens": int(r["moyens"] or 0),
+                "petits": int(r["petits"] or 0),
+            }
             for r in secteurs_qs
         ]
 

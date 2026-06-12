@@ -96,6 +96,7 @@ class FicheRecuVenteSerializer(serializers.ModelSerializer):
     client_nom         = serializers.CharField(source="client_obj.nom", read_only=True, default=None)
     fiche_date         = serializers.DateField(source="fiche.date", read_only=True)
     fiche_superviseur  = serializers.CharField(source="fiche.superviseur_general", read_only=True)
+    fiche_superviseur_telephone = serializers.SerializerMethodField()
     statut_display     = serializers.CharField(source="get_statut_display", read_only=True)
     validated_by_display = serializers.SerializerMethodField()
 
@@ -103,16 +104,33 @@ class FicheRecuVenteSerializer(serializers.ModelSerializer):
         model = FicheRecuVente
         fields = [
             "id", "statut", "statut_display", "validated_by_display", "validated_at",
-            "fiche", "fiche_date", "fiche_superviseur",
+            "fiche", "fiche_date", "fiche_superviseur", "fiche_superviseur_telephone",
             "date", "client", "client_obj", "client_nom",
             "pesee_kg", "non_conformes_pct", "montant",
             "prix_officiel", "prix_calcule", "rapport_prix",
             "reference_facture", "mode_paiement", "vehicule_transport",
         ]
         read_only_fields = [
-            "prix_calcule", "rapport_prix", "fiche_date", "fiche_superviseur", "client_nom",
+            "prix_calcule", "rapport_prix", "fiche_date", "fiche_superviseur",
+            "fiche_superviseur_telephone", "client_nom",
             "statut_display", "validated_by_display", "validated_at",
         ]
+
+    def get_fiche_superviseur_telephone(self, obj):
+        if obj.fiche and obj.fiche.superviseur_general_obj:
+            return obj.fiche.superviseur_general_obj.telephone or ""
+        # Fallback : chercher par le nom texte de la fiche
+        nom = obj.fiche and (obj.fiche.superviseur_general or "").strip()
+        if not nom:
+            return ""
+        from agents.models import SuperviseurGeneral as SupModel
+        from django.db.models import Q, Value, CharField, F
+        from django.db.models.functions import Concat
+        sup = SupModel.objects.annotate(
+            nc=Concat(F("nom"), Value(" "), F("prenom"), output_field=CharField()),
+            nc_rev=Concat(F("prenom"), Value(" "), F("nom"), output_field=CharField()),
+        ).filter(Q(nc__iexact=nom) | Q(nc_rev__iexact=nom) | Q(nom__iexact=nom)).first()
+        return sup.telephone if sup and sup.telephone else ""
 
     def get_prix_calcule(self, obj):
         return obj.prix_calcule
@@ -157,6 +175,7 @@ class ParametreBonusSerializer(serializers.ModelSerializer):
             "id",
             "bareme_grands_defaut", "bareme_moyens_defaut", "bareme_petits_defaut",
             "seuil_non_conformes", "montant_bonus",
+            "prix_kg_officiel",
             "updated_at",
         ]
         read_only_fields = ["id", "updated_at"]
@@ -170,6 +189,7 @@ class FicheRecolteSerializer(serializers.ModelSerializer):
     statut_display = serializers.CharField(source="get_statut_display", read_only=True)
     validated_by_display = serializers.SerializerMethodField()
     superviseur_general_display = serializers.SerializerMethodField()
+    superviseur_general_telephone = serializers.SerializerMethodField()
 
     class Meta:
         model = FicheRecolte
@@ -187,6 +207,22 @@ class FicheRecolteSerializer(serializers.ModelSerializer):
             s = obj.superviseur_general_obj
             return f"{s.nom} {s.prenom}".strip()
         return obj.superviseur_general or None
+
+    def get_superviseur_general_telephone(self, obj):
+        if obj.superviseur_general_obj:
+            return obj.superviseur_general_obj.telephone or ""
+        # Fallback : chercher par nom (gère les deux ordres "NOM Prenom" et "Prenom NOM")
+        nom = (obj.superviseur_general or "").strip()
+        if not nom:
+            return ""
+        from agents.models import SuperviseurGeneral as SupModel
+        from django.db.models import Q, Value, CharField, F
+        from django.db.models.functions import Concat
+        sup = SupModel.objects.annotate(
+            nc=Concat(F("nom"), Value(" "), F("prenom"), output_field=CharField()),
+            nc_rev=Concat(F("prenom"), Value(" "), F("nom"), output_field=CharField()),
+        ).filter(Q(nc__iexact=nom) | Q(nc_rev__iexact=nom) | Q(nom__iexact=nom)).first()
+        return sup.telephone if sup and sup.telephone else ""
 
     def validate(self, attrs):
         # Ces validations ne s'appliquent que si les champs sont présents dans la requête

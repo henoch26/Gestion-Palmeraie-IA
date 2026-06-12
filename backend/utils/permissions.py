@@ -8,6 +8,19 @@ def _get_role(user):
         return None
 
 
+def has_droit(user, code):
+    """Vérifie qu'un utilisateur possède un droit fonctionnel spécifique.
+    L'admin a tous les droits implicitement."""
+    if not user or not user.is_authenticated:
+        return False
+    if _get_role(user) == "admin":
+        return True
+    try:
+        return user.profile.droits.filter(code=code).exists()
+    except AttributeError:
+        return False
+
+
 class IsAdmin(BasePermission):
     """Seuls les administrateurs ont accès."""
     message = "Accès réservé aux administrateurs."

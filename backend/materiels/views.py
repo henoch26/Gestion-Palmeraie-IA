@@ -129,5 +129,53 @@ class MaterielEquipementViewSet(viewsets.ModelViewSet):
 
 
 class MaterielUtiliseTravauxViewSet(viewsets.ModelViewSet):
-    queryset = MaterielUtiliseTravaux.objects.all().order_by("-id")
+    queryset = MaterielUtiliseTravaux.objects.select_related("materiel", "fiche_travaux").order_by("-id")
     serializer_class = MaterielUtiliseTravauxSerializer
+
+    def create(self, request, *args, **kwargs):
+        response = super().create(request, *args, **kwargs)
+        if response.status_code in (200, 201):
+            try:
+                inst = MaterielUtiliseTravaux.objects.select_related("materiel", "fiche_travaux").get(pk=response.data["id"])
+                ref = str(inst.fiche_travaux.periode_travaux) if inst.fiche_travaux and inst.fiche_travaux.periode_travaux else f"fiche #{inst.fiche_travaux_id}"
+                snap = {
+                    "Matériel": str(inst.materiel) if inst.materiel else "",
+                    "Quantité utilisée": str(inst.quantite_utilisee),
+                    "Fiche travaux": ref,
+                }
+            except Exception:
+                snap = {}
+                ref = ""
+            log_action(request.user, "creation_materiel_travaux",
+                       detail=f"Matériel ajouté dans la fiche travaux ({ref}).",
+                       meta={"snapshot": snap})
+        return response
+
+    def partial_update(self, request, *args, **kwargs):
+        instance = self.get_object()
+        old_qty = str(instance.quantite_utilisee)
+        response = super().partial_update(request, *args, **kwargs)
+        if response.status_code == 200:
+            instance.refresh_from_db()
+            new_qty = str(instance.quantite_utilisee)
+            ref = str(instance.fiche_travaux.periode_travaux) if instance.fiche_travaux and instance.fiche_travaux.periode_travaux else f"fiche #{instance.fiche_travaux_id}"
+            changes = []
+            if old_qty != new_qty:
+                changes.append({"field": "Quantité utilisée", "old": old_qty, "new": new_qty})
+            log_action(request.user, "modification_materiel_travaux",
+                       detail=f"Matériel « {instance.materiel} » modifié dans la fiche travaux ({ref}).",
+                       meta={"changes": changes})
+        return response
+
+    def destroy(self, request, *args, **kwargs):
+        instance = self.get_object()
+        ref = str(instance.fiche_travaux.periode_travaux) if instance.fiche_travaux and instance.fiche_travaux.periode_travaux else f"fiche #{instance.fiche_travaux_id}"
+        snap = {
+            "Matériel": str(instance.materiel) if instance.materiel else "",
+            "Quantité utilisée": str(instance.quantite_utilisee),
+            "Fiche travaux": ref,
+        }
+        log_action(request.user, "suppression_materiel_travaux",
+                   detail=f"Matériel « {instance.materiel} » retiré de la fiche travaux ({ref}).",
+                   meta={"snapshot": snap})
+        return super().destroy(request, *args, **kwargs)

@@ -1,5 +1,9 @@
+import secrets
+from datetime import timedelta
+
 from django.conf import settings
 from django.db import models
+from django.utils import timezone
 
 
 class Notification(models.Model):
@@ -84,6 +88,29 @@ class UserProfile(models.Model):
     @property
     def is_superviseur_adjoint(self):
         return self.role == self.ROLE_SUPERVISEUR_ADJOINT
+
+
+class PasswordResetToken(models.Model):
+    """Token à usage unique pour la réinitialisation de mot de passe (valide 1 h)."""
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="reset_tokens",
+    )
+    token = models.CharField(max_length=64, unique=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    used = models.BooleanField(default=False)
+
+    class Meta:
+        db_table = "password_reset_token"
+
+    @classmethod
+    def create_for_user(cls, user):
+        cls.objects.filter(user=user, used=False).delete()
+        return cls.objects.create(user=user, token=secrets.token_urlsafe(32))
+
+    def is_valid(self):
+        return not self.used and (timezone.now() - self.created_at) < timedelta(hours=1)
 
 
 class AuditLog(models.Model):

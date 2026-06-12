@@ -43,23 +43,25 @@ def build_revert_meta(instance, field_labels: dict, extra_fields: list = None) -
     return raw
 
 
-def log_action(user, action, detail="", fiche=None, recu=None, meta: dict = None):
+def log_action(user, action, detail="", fiche=None, recu=None, meta: dict = None, superviseur=None):
     """Crée une entrée ActionLog.
 
     meta peut contenir :
       - "changes": [{field, old, new}]  → pour les modifications
       - "snapshot": {label: valeur}     → pour créations / suppressions
     Ces données sont sérialisées en JSON dans le champ `detail`.
+
+    superviseur : utilisateur concerné par l'action (calculé automatiquement si omis).
     """
     from recoltes.models import ActionLog
 
-    superviseur = None
-    if fiche and fiche.created_by:
-        superviseur = fiche.created_by
-    elif recu and recu.fiche and recu.fiche.created_by:
-        superviseur = recu.fiche.created_by
-    elif _is_superviseur(user):
-        superviseur = user
+    if superviseur is None:
+        if fiche and fiche.created_by:
+            superviseur = fiche.created_by
+        elif recu and recu.fiche and recu.fiche.created_by:
+            superviseur = recu.fiche.created_by
+        elif _is_superviseur(user):
+            superviseur = user
 
     if meta:
         stored = {"label": detail}

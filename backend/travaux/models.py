@@ -54,6 +54,14 @@ class FicheTravaux(models.Model):
         related_name="fiches_travaux",
     )
     statut = models.CharField(max_length=20, choices=STATUT_CHOICES, default="brouillon")
+    validated_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="travaux_valides",
+    )
+    validated_at = models.DateTimeField(null=True, blank=True)
 
     # En-tete (fiche papier)
     superviseur_travaux = models.CharField(max_length=120, blank=True)

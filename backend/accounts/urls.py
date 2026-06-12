@@ -1,6 +1,7 @@
 from django.urls import path
 from .views import (
     login_view, me_view, health_view, change_password_view, profile_view,
+    forgot_password_view, reset_password_view,
     users_list_create, users_detail,
     notifications_list, notification_mark_read, notifications_mark_all_read,
     audit_log_list, superviseurs_list, droits_list,
@@ -11,6 +12,8 @@ urlpatterns = [
     path("auth/me/", me_view),
     path("auth/change-password/", change_password_view),
     path("auth/profile/", profile_view),
+    path("auth/forgot-password/", forgot_password_view),
+    path("auth/reset-password/", reset_password_view),
     path("health/", health_view),
     # Gestion utilisateurs (admin uniquement)
     path("users/", users_list_create),

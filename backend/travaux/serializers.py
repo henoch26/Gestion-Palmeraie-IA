@@ -53,12 +53,14 @@ class FicheTravauxSerializer(serializers.ModelSerializer):
     repartitions = RepartitionTacheSerializer(many=True, required=False)
     total_cout = serializers.SerializerMethodField()
     created_by_username = serializers.CharField(source="created_by.username", read_only=True)
+    validated_by_display = serializers.SerializerMethodField()
     statut_display = serializers.CharField(source="get_statut_display", read_only=True)
     statut_avancement_display = serializers.CharField(source="get_statut_avancement_display", read_only=True)
     nature_travaux_display = serializers.CharField(source="get_nature_travaux_display", read_only=True)
     type_travaux_display = serializers.SerializerMethodField()
+    superviseur_travaux_telephone = serializers.SerializerMethodField()
 
-    CHAMPS_ADMIN = {"total_cout", "consommables", "cout_total_calcule"}
+    CHAMPS_ADMIN = {"total_cout", "cout_total_calcule"}
 
     class Meta:
         model = FicheTravaux
@@ -78,6 +80,12 @@ class FicheTravauxSerializer(serializers.ModelSerializer):
                 data.pop(champ, None)
         return data
 
+    def get_validated_by_display(self, obj):
+        if obj.validated_by:
+            name = f"{obj.validated_by.first_name} {obj.validated_by.last_name}".strip()
+            return name or obj.validated_by.username
+        return None
+
     def get_secteurs_couverts_codes(self, obj):
         return list(obj.secteurs_couverts.all().values_list("code", flat=True))
 
@@ -93,6 +101,13 @@ class FicheTravauxSerializer(serializers.ModelSerializer):
         if obj.type_travaux:
             return dict(FicheTravaux.TYPE_TRAVAUX_CHOICES).get(obj.type_travaux, obj.type_travaux)
         return None
+
+    def get_superviseur_travaux_telephone(self, obj):
+        if not obj.superviseur_travaux:
+            return ""
+        from agents.models import SuperviseurGeneral
+        sup = SuperviseurGeneral.objects.filter(nom__iexact=obj.superviseur_travaux).first()
+        return sup.telephone if sup and sup.telephone else ""
 
     def validate(self, attrs):
         if self.instance is None or "superviseur_travaux" in attrs:

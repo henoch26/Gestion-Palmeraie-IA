@@ -52,7 +52,7 @@ class CreateUserSerializer(serializers.Serializer):
     password = serializers.CharField(write_only=True, min_length=6)
     first_name = serializers.CharField(max_length=150, required=False, allow_blank=True)
     last_name = serializers.CharField(max_length=150, required=False, allow_blank=True)
-    email = serializers.EmailField(required=False, allow_blank=True)
+    email = serializers.EmailField(required=True)
     role = serializers.ChoiceField(choices=UserProfile.ROLE_CHOICES)
     numero_telephone = serializers.CharField(max_length=20, required=False, allow_blank=True)
 

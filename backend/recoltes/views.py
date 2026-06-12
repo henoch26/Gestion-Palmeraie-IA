@@ -1,4 +1,5 @@
 import io
+import json
 
 from django.http import HttpResponse
 from django.db.models import Sum, Count, Max, Q
@@ -11,7 +12,7 @@ from rest_framework.decorators import action
 from rest_framework.response import Response
 
 from recolteurs.models import Personnel
-from utils.permissions import IsAdmin
+from utils.permissions import IsAdmin, has_droit
 from accounts.utils import create_notification
 from .models import ActionLog, Client, FicheRecolte, FicheRecolteDetail, FicheRecuVente, ParametreBonus
 from .serializers import (
@@ -26,15 +27,52 @@ from .serializers import (
 class ClientViewSet(viewsets.ModelViewSet):
     """
     Lecture : tous les utilisateurs authentifiés.
-    Création / modification / suppression : administrateur uniquement.
+    Écriture : administrateur ou superviseur avec droit gerer_clients.
     """
     queryset = Client.objects.all().order_by("nom")
     serializer_class = ClientSerializer
 
     def get_permissions(self):
         if self.action in ("create", "update", "partial_update", "destroy"):
+            if has_droit(self.request.user, "gerer_clients"):
+                return super().get_permissions()
             return [IsAdmin()]
         return super().get_permissions()
+
+    def create(self, request, *args, **kwargs):
+        response = super().create(request, *args, **kwargs)
+        if response.status_code in (200, 201):
+            snap = {label: str(response.data.get(field) or "") for field, label in _CLIENT_FIELDS.items()}
+            _log_action(request.user, "creation_client",
+                        detail=f"Client « {response.data.get('nom', '')} » créé.",
+                        meta={"snapshot": snap})
+        return response
+
+    def partial_update(self, request, *args, **kwargs):
+        instance = self.get_object()
+        changes = []
+        for field, label in _CLIENT_FIELDS.items():
+            if field in request.data:
+                old_val = getattr(instance, field, None)
+                new_val = request.data[field]
+                if str(old_val or "") != str(new_val or ""):
+                    changes.append({"field": label, "old": str(old_val or ""), "new": str(new_val or "")})
+        response = super().partial_update(request, *args, **kwargs)
+        if response.status_code == 200:
+            _log_action(request.user, "modification_client",
+                        detail=f"Client « {instance.nom} » modifié.",
+                        meta={"changes": changes})
+        return response
+
+    def destroy(self, request, *args, **kwargs):
+        instance = self.get_object()
+        snap = {label: str(getattr(instance, field, "") or "") for field, label in _CLIENT_FIELDS.items()}
+        response = super().destroy(request, *args, **kwargs)
+        if response.status_code in (200, 204):
+            _log_action(request.user, "suppression_client",
+                        detail=f"Client « {instance.nom} » supprimé.",
+                        meta={"snapshot": snap})
+        return response
 
 
 def _send_wb(wb, filename: str) -> HttpResponse:
@@ -70,7 +108,44 @@ def _is_superviseur(user):
         return False
 
 
-def _log_action(acteur, action, fiche=None, recu=None, detail=""):
+# Champs tracés pour les détails de modification
+_FICHE_FIELDS = {
+    "date": "Date",
+    "superviseur_general": "Superviseur général",
+    "bareme_grands": "Barème grands (FCFA)",
+    "bareme_moyens": "Barème moyens (FCFA)",
+    "bareme_petits": "Barème petits (FCFA)",
+    "depense_nourriture": "Dépense nourriture (FCFA)",
+    "depense_transport": "Dépense transport (FCFA)",
+    "depense_salaire": "Dépense salaire (FCFA)",
+    "observations": "Observations",
+    "heure_debut": "Heure début",
+    "heure_fin": "Heure fin",
+    "conditions_meteo": "Conditions météo",
+    "nb_palmiers_recoltes": "Palmiers récoltés",
+    "surface_recoltee_ha": "Surface récoltée (ha)",
+}
+
+_RECU_FIELDS = {
+    "date": "Date",
+    "client": "Client",
+    "pesee_kg": "Pesée (kg)",
+    "non_conformes_pct": "Non conformes (%)",
+    "montant": "Montant (FCFA)",
+    "prix_officiel": "Prix officiel (FCFA/kg)",
+    "reference_facture": "Référence facture",
+    "mode_paiement": "Mode paiement",
+    "vehicule_transport": "Véhicule transport",
+}
+
+_CLIENT_FIELDS = {
+    "nom": "Nom",
+    "telephone": "Téléphone",
+    "adresse": "Adresse",
+}
+
+
+def _log_action(acteur, action, fiche=None, recu=None, detail="", meta=None):
     """Enregistre une action dans le journal de traçabilité."""
     superviseur = None
     if fiche and fiche.created_by:
@@ -80,13 +155,19 @@ def _log_action(acteur, action, fiche=None, recu=None, detail=""):
     # Quand le superviseur agit sur ses propres données, il est à la fois acteur et superviseur
     if superviseur is None and acteur and _is_superviseur(acteur):
         superviseur = acteur
+    if meta:
+        stored = {"label": detail}
+        stored.update(meta)
+        stored_detail = json.dumps(stored, ensure_ascii=False, default=str)
+    else:
+        stored_detail = detail
     ActionLog.objects.create(
         acteur=acteur,
         superviseur=superviseur,
         action=action,
         fiche=fiche,
         recu=recu,
-        detail=detail,
+        detail=stored_detail,
     )
 
 
@@ -117,12 +198,12 @@ def _notify_statut_recolte(instance, old_statut, new_statut, actor=None):
                 "success",
                 "/recoltes",
             )
-    elif new_statut == "brouillon" and old_statut == "soumis" and instance.created_by:
+    elif new_statut == "brouillon" and old_statut in ("soumis", "valide") and instance.created_by:
         create_notification(
             instance.created_by,
             f"Votre fiche de recolte du {date_str} a ete rejetee.",
             "warning",
-            "/recoltes",
+            f"/mon-audit?action=rejet&fiche_id={instance.id}",
         )
 
 
@@ -130,7 +211,9 @@ class FicheRecolteViewSet(viewsets.ModelViewSet):
     serializer_class = FicheRecolteSerializer
 
     def get_queryset(self):
-        qs = FicheRecolte.objects.prefetch_related(
+        qs = FicheRecolte.objects.select_related(
+            "superviseur_general_obj"
+        ).prefetch_related(
             "superviseurs_adjoints", "lignes__details", "recus"
         ).order_by("-id")
         # Admin voit toutes les fiches ; superviseur uniquement les siennes
@@ -151,15 +234,36 @@ class FicheRecolteViewSet(viewsets.ModelViewSet):
         if response.status_code in (200, 201):
             fiche_id = response.data.get("id")
             date_str = response.data.get("date", f"#{fiche_id}")
+            snap = {
+                "Date": str(response.data.get("date", "")),
+                "Superviseur général": str(response.data.get("superviseur_general", "") or ""),
+                "Barème grands (FCFA)": str(response.data.get("bareme_grands", "")),
+                "Barème moyens (FCFA)": str(response.data.get("bareme_moyens", "")),
+                "Barème petits (FCFA)": str(response.data.get("bareme_petits", "")),
+                "Observations": str(response.data.get("observations", "") or ""),
+            }
             _log_action(request.user, "creation_fiche",
-                        detail=f"Fiche du {date_str} créée.")
+                        detail=f"Fiche du {date_str} créée.",
+                        meta={"snapshot": snap})
         return response
 
     def destroy(self, request, *args, **kwargs):
         instance = self.get_object()
         date_str = str(instance.date) if instance.date else f"#{instance.pk}"
+        snap = {
+            "Date": date_str,
+            "Superviseur général": instance.superviseur_general or "",
+            "Statut": instance.get_statut_display(),
+            "Barème grands (FCFA)": str(instance.bareme_grands),
+            "Barème moyens (FCFA)": str(instance.bareme_moyens),
+            "Barème petits (FCFA)": str(instance.bareme_petits),
+            "Dépense nourriture (FCFA)": str(instance.depense_nourriture),
+            "Dépense transport (FCFA)": str(instance.depense_transport),
+            "Observations": instance.observations or "",
+        }
         _log_action(request.user, "suppression_fiche",
-                    detail=f"Fiche du {date_str} supprimée.")
+                    detail=f"Fiche du {date_str} supprimée.",
+                    meta={"snapshot": snap})
         return super().destroy(request, *args, **kwargs)
 
     def get_permissions(self):
@@ -181,6 +285,12 @@ class FicheRecolteViewSet(viewsets.ModelViewSet):
                 {"detail": "Seul l'administrateur ou le superviseur peut valider une fiche."},
                 status=403,
             )
+        # Seul l'admin peut rejeter une fiche (brouillon depuis soumis ou valide)
+        if new_statut == "brouillon" and instance and instance.statut in ("soumis", "valide") and not is_admin:
+            return Response(
+                {"detail": "Seul l'administrateur peut rejeter une fiche de récolte."},
+                status=403,
+            )
         # Seul l'admin peut modifier une fiche déjà validée
         if instance and instance.statut == "valide" and not is_admin:
             return Response(
@@ -200,15 +310,34 @@ class FicheRecolteViewSet(viewsets.ModelViewSet):
         # ── Transitions de statut ──────────────────────────────────────────────
         if new_statut and new_statut != old_statut:
             if new_statut == "valide":
+                snap = {
+                    "Date": str(instance.date),
+                    "Superviseur général": instance.superviseur_general or "",
+                    "Barème grands (FCFA)": str(instance.bareme_grands),
+                    "Barème moyens (FCFA)": str(instance.bareme_moyens),
+                    "Barème petits (FCFA)": str(instance.bareme_petits),
+                    "Dépense totale (FCFA)": str(instance.depense_total),
+                }
                 _log_action(request.user, "validation", fiche=instance,
-                            detail=f"Fiche du {instance.date} validée.")
+                            detail=f"Fiche du {instance.date} validée.",
+                            meta={"snapshot": snap})
             elif new_statut == "soumis" and is_sup:
+                snap = {
+                    "Date": str(instance.date),
+                    "Superviseur général": instance.superviseur_general or "",
+                    "Statut précédent": old_statut,
+                }
                 _log_action(request.user, "soumission_fiche", fiche=instance,
-                            detail=f"Fiche du {instance.date} soumise pour validation.")
-            elif new_statut == "brouillon" and old_statut == "soumis" and is_admin:
-                motif = data.get("motif", "")
+                            detail=f"Fiche du {instance.date} soumise pour validation.",
+                            meta={"snapshot": snap})
+            elif new_statut == "brouillon" and old_statut in ("soumis", "valide") and is_admin:
+                motif = data.get("motif", "").strip()
+                detail_rejet = f"Fiche du {instance.date} rejetée."
+                if motif:
+                    detail_rejet += f" Motif : {motif}"
                 _log_action(request.user, "rejet", fiche=instance,
-                            detail=f"Fiche du {instance.date} rejetée. Motif : {motif}")
+                            detail=detail_rejet,
+                            meta={"motif": motif, "date_fiche": str(instance.date)})
             return
 
         if not is_admin:
@@ -225,8 +354,20 @@ class FicheRecolteViewSet(viewsets.ModelViewSet):
             _log_action(request.user, "modification_bareme", fiche=instance,
                         detail="Barème modifié. " + " | ".join(details))
             return
+        changes = []
+        for field, label in _FICHE_FIELDS.items():
+            if field in data:
+                old_val = getattr(instance, field, None)
+                new_val = data[field]
+                if str(old_val if old_val is not None else "") != str(new_val if new_val is not None else ""):
+                    changes.append({
+                        "field": label,
+                        "old": str(old_val) if old_val is not None else "",
+                        "new": str(new_val) if new_val is not None else "",
+                    })
         _log_action(request.user, "modification_fiche", fiche=instance,
-                    detail=f"Fiche du {instance.date} modifiée par l'admin.")
+                    detail=f"Fiche du {instance.date} modifiée par l'admin.",
+                    meta={"changes": changes})
 
     def partial_update(self, request, *args, **kwargs):
         instance = self.get_object()
@@ -244,6 +385,11 @@ class FicheRecolteViewSet(viewsets.ModelViewSet):
             instance.refresh_from_db()
             instance.validated_by = request.user
             instance.validated_at = timezone.now()
+            instance.save(update_fields=["validated_by", "validated_at"])
+        elif new_statut == "brouillon" and old_statut == "valide":
+            instance.refresh_from_db()
+            instance.validated_by = None
+            instance.validated_at = None
             instance.save(update_fields=["validated_by", "validated_at"])
         _notify_statut_recolte(instance, old_statut, new_statut, actor=request.user)
         return response
@@ -465,9 +611,9 @@ class FicheRecuVenteViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         qs = FicheRecuVente.objects.select_related(
-            "fiche", "client_obj", "validated_by"
+            "fiche", "fiche__superviseur_general_obj", "client_obj", "validated_by"
         ).order_by("-date", "-id")
-        if not _is_admin(self.request.user):
+        if not _is_admin(self.request.user) and not has_droit(self.request.user, "gerer_recus_vente"):
             qs = qs.filter(fiche__created_by=self.request.user)
 
         fiche_id = self.request.query_params.get("fiche")
@@ -490,19 +636,47 @@ class FicheRecuVenteViewSet(viewsets.ModelViewSet):
             qs = qs.filter(statut=statut)
         return qs
 
-    def perform_create(self, serializer):
+    def create(self, request, *args, **kwargs):
+        from rest_framework.exceptions import PermissionDenied
+        if not _is_admin(request.user) and not has_droit(request.user, "gerer_recus_vente"):
+            raise PermissionDenied("Vous n'avez pas le droit de créer des reçus de vente.")
+        response = super().create(request, *args, **kwargs)
+        if response.status_code in (200, 201):
+            try:
+                instance = FicheRecuVente.objects.select_related("fiche").get(pk=response.data["id"])
+                snap = {label: str(getattr(instance, field, "") or "") for field, label in _RECU_FIELDS.items()}
+                fiche_ref = instance.fiche
+            except Exception:
+                snap = {}
+                fiche_ref = None
+            _log_action(request.user, "creation_recu",
+                        fiche=fiche_ref,
+                        detail=f"Reçu #{response.data.get('id', '')} créé (fiche du {response.data.get('fiche_date', '?')}).",
+                        meta={"snapshot": snap})
+        return response
+
+    def _check_ownership(self, serializer):
+        from rest_framework.exceptions import PermissionDenied
         fiche = serializer.validated_data.get("fiche")
         if fiche and not _is_admin(self.request.user):
             if fiche.created_by != self.request.user:
-                from rest_framework.exceptions import PermissionDenied
                 raise PermissionDenied("Vous ne pouvez créer un reçu que pour vos propres fiches.")
-        serializer.save()
+
+    def perform_create(self, serializer):
+        self._check_ownership(serializer)
+        extra = {}
+        # Auto-fill prix_officiel from global parameter if not provided
+        if serializer.validated_data.get("prix_officiel") is None:
+            param_prix = ParametreBonus.get_instance().prix_kg_officiel
+            if param_prix is not None:
+                extra["prix_officiel"] = param_prix
+        serializer.save(**extra)
 
     def _check_recu_editable(self, request, instance):
-        """Retourne une Response d'erreur si le reçu ne peut pas être modifié par cet utilisateur."""
-        if instance.statut == "valide" and not _is_admin(request.user):
+        """Un reçu validé est figé — personne ne peut le modifier (seule la suppression/annulation reste possible)."""
+        if instance.statut == "valide":
             from rest_framework.exceptions import PermissionDenied
-            raise PermissionDenied("Ce reçu est validé. Seul l'administrateur peut le modifier.")
+            raise PermissionDenied("Ce reçu est validé et ne peut plus être modifié. Supprimez-le pour le recréer si nécessaire.")
 
     def partial_update(self, request, *args, **kwargs):
         instance = self.get_object()
@@ -518,35 +692,104 @@ class FicheRecuVenteViewSet(viewsets.ModelViewSet):
                 _log_action(request.user, "prix_officiel", fiche=instance.fiche, recu=instance,
                             detail=f"Prix officiel : {old_val} → {new_val} FCFA/kg (reçu #{instance.id}, fiche du {instance.fiche.date if instance.fiche else '?'})")
             else:
+                changes = []
+                for field, label in _RECU_FIELDS.items():
+                    if field in request.data:
+                        old_val = getattr(instance, field, None)
+                        new_val = request.data[field]
+                        if str(old_val if old_val is not None else "") != str(new_val if new_val is not None else ""):
+                            changes.append({
+                                "field": label,
+                                "old": str(old_val) if old_val is not None else "",
+                                "new": str(new_val) if new_val is not None else "",
+                            })
                 _log_action(request.user, "modification_recu", fiche=instance.fiche, recu=instance,
-                            detail=f"Reçu #{instance.id} modifié (fiche du {instance.fiche.date if instance.fiche else '?'}).")
+                            detail=f"Reçu #{instance.id} modifié (fiche du {instance.fiche.date if instance.fiche else '?'}).",
+                            meta={"changes": changes})
         return super().partial_update(request, *args, **kwargs)
 
     def destroy(self, request, *args, **kwargs):
         instance = self.get_object()
-        self._check_recu_editable(request, instance)
+        if instance.statut == "valide" and not _is_admin(request.user):
+            from rest_framework.exceptions import PermissionDenied
+            raise PermissionDenied("Ce reçu est validé et ne peut être supprimé que par l'administrateur.")
         if _is_admin(request.user):
+            snap = {label: str(getattr(instance, field, "") or "") for field, label in _RECU_FIELDS.items()}
             _log_action(request.user, "suppression_recu", fiche=instance.fiche, recu=instance,
-                        detail=f"Reçu #{instance.id} du {instance.date} supprimé (fiche du {instance.fiche.date if instance.fiche else '?'}).")
+                        detail=f"Reçu #{instance.id} du {instance.date} supprimé (fiche du {instance.fiche.date if instance.fiche else '?'}).",
+                        meta={"snapshot": snap})
         return super().destroy(request, *args, **kwargs)
 
     @action(detail=True, methods=["post"], url_path="valider")
     def valider(self, request, pk=None):
-        """Valide un reçu de vente (admin uniquement)."""
-        if not _is_admin(request.user):
-            return Response({"detail": "Seul l'administrateur peut valider un reçu."}, status=403)
-        instance = self.get_object()
+        """Valide un reçu de vente — le superviseur créateur ou un admin."""
+        instance = self.get_object()  # queryset limite déjà l'accès aux propres fiches
+        can_validate = (
+            _is_admin(request.user)
+            or has_droit(request.user, "gerer_recus_vente")
+            or (instance.fiche and instance.fiche.created_by == request.user)
+        )
+        if not can_validate:
+            return Response({"detail": "Vous n'avez pas le droit de valider ce reçu."}, status=403)
         if instance.statut == "valide":
             return Response({"detail": "Ce reçu est déjà validé."}, status=400)
         instance.statut = "valide"
         instance.validated_by = request.user
         instance.validated_at = timezone.now()
         instance.save(update_fields=["statut", "validated_by", "validated_at"])
+        snap = {label: str(getattr(instance, field, "") or "") for field, label in _RECU_FIELDS.items()}
         _log_action(
             request.user, "validation_recu",
             fiche=instance.fiche, recu=instance,
             detail=f"Reçu #{instance.id} du {instance.date} validé (fiche du {instance.fiche.date if instance.fiche else '?'}).",
+            meta={"snapshot": snap},
         )
+        if not _is_admin(request.user):
+            from django.contrib.auth.models import User as DjangoUser
+            actor_name = f"{request.user.first_name} {request.user.last_name}".strip() or request.user.username
+            admins = DjangoUser.objects.filter(profile__role="admin", is_active=True)
+            for admin in admins:
+                create_notification(
+                    admin,
+                    f"Le reçu #{instance.id} du {instance.date} a été validé par {actor_name}.",
+                    "info",
+                    "/recoltes?tab=ventes",
+                )
+        return Response(self.get_serializer(instance).data)
+
+    @action(detail=True, methods=["post"], url_path="rejeter")
+    def rejeter(self, request, pk=None):
+        """Rejette un reçu validé — le repasse en brouillon (admin uniquement)."""
+        if not _is_admin(request.user):
+            return Response({"detail": "Seul l'administrateur peut rejeter un reçu."}, status=403)
+        instance = self.get_object()
+        if instance.statut != "valide":
+            return Response({"detail": "Seul un reçu validé peut être rejeté."}, status=400)
+
+        motif = (request.data.get("motif") or "").strip()
+        instance.statut = "valide"   # temporaire pour l'audit snapshot
+        snap = {label: str(getattr(instance, field, "") or "") for field, label in _RECU_FIELDS.items()}
+
+        instance.statut = "brouillon"
+        instance.validated_by = None
+        instance.validated_at = None
+        instance.save(update_fields=["statut", "validated_by", "validated_at"])
+
+        detail_rejet = f"Reçu #{instance.id} du {instance.date} rejeté (fiche du {instance.fiche.date if instance.fiche else '?'})."
+        if motif:
+            detail_rejet += f" Motif : {motif}"
+        _log_action(request.user, "rejet_recu", fiche=instance.fiche, recu=instance,
+                    detail=detail_rejet,
+                    meta={"snapshot": snap, "motif": motif})
+
+        if instance.fiche and instance.fiche.created_by:
+            create_notification(
+                instance.fiche.created_by,
+                f"Votre reçu #{instance.id} du {instance.date} a été rejeté.",
+                "warning",
+                f"/mon-audit?action=rejet_recu&fiche_id={instance.fiche.id}",
+            )
+
         return Response(self.get_serializer(instance).data)
 
 
@@ -562,9 +805,26 @@ class ParametreBonusViewSet(viewsets.ViewSet):
         if not _is_admin(request.user):
             return Response({"detail": "Réservé à l'administrateur."}, status=403)
         obj = ParametreBonus.get_instance()
+        _BONUS_FIELDS = {
+            "bareme_grands_defaut":  "Barème grands défaut (FCFA)",
+            "bareme_moyens_defaut":  "Barème moyens défaut (FCFA)",
+            "bareme_petits_defaut":  "Barème petits défaut (FCFA)",
+            "seuil_non_conformes":   "Seuil non conformes (%)",
+            "montant_bonus":         "Montant bonus (FCFA)",
+        }
+        changes = []
+        for field, label in _BONUS_FIELDS.items():
+            if field in request.data:
+                old_val = getattr(obj, field, None)
+                new_val = request.data[field]
+                if str(old_val or "") != str(new_val or ""):
+                    changes.append({"field": label, "old": str(old_val or ""), "new": str(new_val or "")})
         serializer = ParametreBonusSerializer(obj, data=request.data, partial=True)
         serializer.is_valid(raise_exception=True)
         serializer.save()
+        _log_action(request.user, "modification_bareme",
+                    detail="Paramètres bonus modifiés.",
+                    meta={"changes": changes})
         return Response(serializer.data)
 
 
@@ -724,6 +984,7 @@ class ActionLogViewSet(viewsets.ReadOnlyModelViewSet):
         action = self.request.query_params.get("action")
         date_debut = self.request.query_params.get("date_debut")
         date_fin   = self.request.query_params.get("date_fin")
+        fiche_id   = self.request.query_params.get("fiche_id")
 
         if action:
             qs = qs.filter(action=action)
@@ -731,4 +992,6 @@ class ActionLogViewSet(viewsets.ReadOnlyModelViewSet):
             qs = qs.filter(timestamp__date__gte=date_debut)
         if date_fin:
             qs = qs.filter(timestamp__date__lte=date_fin)
+        if fiche_id:
+            qs = qs.filter(fiche_id=fiche_id)
         return qs
