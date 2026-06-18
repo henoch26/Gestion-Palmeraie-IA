@@ -6,7 +6,7 @@ const API_BASE = import.meta.env.VITE_API_URL || "http://127.0.0.1:8000/api";
 // Lecture locale des infos auth
 export function getStoredAuth() {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
+    const raw = sessionStorage.getItem(STORAGE_KEY);
     return raw ? JSON.parse(raw) : null;
   } catch {
     return null;
@@ -30,13 +30,13 @@ export async function login({ username, password }) {
     throw new Error(data.detail || "Erreur de connexion");
   }
 
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+  sessionStorage.setItem(STORAGE_KEY, JSON.stringify(data));
   return data;
 }
 
 // Deconnexion
 export function logout() {
-  localStorage.removeItem(STORAGE_KEY);
+  sessionStorage.removeItem(STORAGE_KEY);
 }
 
 // Token (utile pour les futurs appels API)
@@ -64,7 +64,52 @@ export async function updateProfile(data) {
 
 // Mise à jour du stockage local (ex. après changement de mot de passe)
 export function updateStoredAuth(data) {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+  sessionStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+}
+
+// Mot de passe oublié — envoie l'email de réinitialisation
+export async function forgotPassword(email) {
+  const res = await fetch(`${API_BASE}/auth/forgot-password/`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.detail || "Erreur lors de la demande");
+  return data;
+}
+
+// Réinitialisation du mot de passe avec le token reçu par email
+export async function resetPassword(token, password) {
+  const res = await fetch(`${API_BASE}/auth/reset-password/`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ token, password }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.detail || "Lien invalide ou expiré");
+  return data;
+}
+
+// Rafraîchissement silencieux des données utilisateur (permissions incluses)
+export async function refreshMe() {
+  const token = getToken();
+  if (!token) return null;
+  try {
+    const res = await fetch(`${API_BASE}/auth/me/`, {
+      headers: { Authorization: `Token ${token}` },
+    });
+    if (!res.ok) return null;
+    const data = await res.json().catch(() => null);
+    if (data?.user) {
+      const updated = { token, ...data };
+      sessionStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
+      return updated;
+    }
+  } catch {
+    // silencieux — pas de connexion réseau, on garde la session en cache
+  }
+  return null;
 }
 
 // Changement de mot de passe

@@ -2,8 +2,10 @@
 __pycache__/
 *.py[cod]
 
-# Django / local settings
+# Django / local settings et production
 .env
+backend/.env
+backend/staticfiles/
 
 # Virtualenvs
 .venv/
@@ -13,4 +15,10 @@ backend/venv/
 # Node
 node_modules/
 frontend/node_modules/
+
+# Frontend build et config production
+frontend/dist/
+frontend/.env.production
+frontend/.env.local
+frontend/.env.*.local
 

@@ -7,8 +7,8 @@ import {
 } from "../../data/ficheRecolteData.js";
 import { useToast } from "../../context/ToastContext.jsx";
 import { listSecteurs } from "../../services/secteurService.js";
-import { createFiche, getRecoltesAnalytics, listFiches, patchFiche, updateFiche } from "../../services/recolteService.js";
-import { createRecuVente, deleteRecuVente, getParametreBonus, listRecusVente, updateRecuVente, validerRecu } from "../../services/recuVenteService.js";
+import { createFiche, deleteFiche, getRecoltesAnalytics, listFiches, patchFiche, updateFiche } from "../../services/recolteService.js";
+import { createRecuVente, deleteRecuVente, getParametreBonus, listRecusVente, rejeterRecu, updateRecuVente, validerRecu } from "../../services/recuVenteService.js";
 import { useRecoltes } from "../../context/RecoltesContext.jsx";
 import { useAuth } from "../../context/AuthContext.jsx";
 import { listRecolteurs } from "../../services/recolteurService.js";
@@ -26,6 +26,7 @@ import ClientSelect from "../../components/ClientSelect.jsx";
 import { listClients } from "../../services/clientService.js";
 import { getToken } from "../../services/authService.js";
 import { saveRecolteOffline } from "../../utils/offline.js";
+import useBodyScrollLock from "../../utils/useBodyScrollLock.js";
 
 const API_BASE = import.meta.env.VITE_API_URL || "http://127.0.0.1:8000/api";
 
@@ -36,9 +37,10 @@ const VENTE_EMPTY = {
   reference_facture: "", mode_paiement: "", vehicule_transport: "",
 };
 
-function VenteDialog({ open, row, isAdmin, historyRows, clientsList, saving, onClose, onSubmit }) {
+function VenteDialog({ open, row, isAdmin, prixOfficielGlobal, historyRows, clientsList, saving, onClose, onSubmit }) {
   const [form, setForm] = useState(VENTE_EMPTY);
   const [errors, setErrors] = useState({});
+  useBodyScrollLock(!!open);
 
   useEffect(() => {
     if (!open) return;
@@ -57,7 +59,7 @@ function VenteDialog({ open, row, isAdmin, historyRows, clientsList, saving, onC
         vehicule_transport: row.vehicule_transport ?? "",
       });
     } else {
-      setForm({ ...VENTE_EMPTY });
+      setForm({ ...VENTE_EMPTY, prix_officiel: prixOfficielGlobal != null ? String(prixOfficielGlobal) : "" });
     }
     setErrors({});
   }, [open, row]);
@@ -65,7 +67,18 @@ function VenteDialog({ open, row, isAdmin, historyRows, clientsList, saving, onC
   if (!open) return null;
 
   const set = (field, value) => {
-    setForm((p) => ({ ...p, [field]: value }));
+    setForm((p) => {
+      const updated = { ...p, [field]: value };
+      // Auto-calculer le montant quand pesee_kg ou prix_officiel change
+      if (field === "pesee_kg" || field === "prix_officiel") {
+        const kg   = Number(field === "pesee_kg"    ? value : p.pesee_kg);
+        const prix = Number(field === "prix_officiel" ? value : p.prix_officiel);
+        if (kg > 0 && prix > 0) {
+          updated.montant = String(Math.round(kg * prix));
+        }
+      }
+      return updated;
+    });
     setErrors((p) => ({ ...p, [field]: null }));
   };
 
@@ -91,7 +104,7 @@ function VenteDialog({ open, row, isAdmin, historyRows, clientsList, saving, onC
       client_obj: form.client_obj ? Number(form.client_obj) : null,
       pesee_kg: form.pesee_kg !== "" ? Number(form.pesee_kg) : 0,
       non_conformes_pct: form.non_conformes_pct !== "" ? Number(form.non_conformes_pct) : 0,
-      montant: Number(form.montant),
+      montant: Math.round(Number(form.montant)),
       prix_officiel: isAdmin && form.prix_officiel !== "" ? Number(form.prix_officiel) : undefined,
       reference_facture: form.reference_facture || "",
       mode_paiement: form.mode_paiement || null,
@@ -103,134 +116,255 @@ function VenteDialog({ open, row, isAdmin, historyRows, clientsList, saving, onC
 
   const ficheOptions = (historyRows || []).filter((f) => f.statut === "valide");
 
+  const handlePrint = () => {
+    const fmtNum = (n) => n != null ? Number(n).toLocaleString("fr-FR", { maximumFractionDigits: 0 }) : "—";
+    const modeLabel = { espece: "Espèces", virement: "Virement" };
+    const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Recu de vente #${row?.id}</title>
+<style>
+  body{font-family:Arial,sans-serif;padding:24px;max-width:580px;margin:0 auto;color:#222}
+  h2{text-align:center;color:#1f4e79;border-bottom:3px solid #2e7d32;padding-bottom:8px;margin-bottom:4px}
+  .sub{text-align:center;font-size:12px;color:#888;margin-bottom:20px}
+  .badge{display:inline-block;background:#e8f5e9;color:#2e7d32;padding:2px 12px;border-radius:12px;font-size:12px;font-weight:700;border:1px solid #a5d6a7}
+  .grid{display:grid;grid-template-columns:1fr 1fr;gap:10px 20px;margin:18px 0}
+  .item .lbl{font-size:10px;color:#888;text-transform:uppercase;letter-spacing:.5px}
+  .item .val{font-size:14px;font-weight:600;margin-top:2px}
+  .total{background:#1f4e79;color:#fff;padding:14px 20px;border-radius:8px;text-align:center;margin:18px 0}
+  .total .lbl{font-size:11px;opacity:.8;text-transform:uppercase}
+  .total .val{font-size:26px;font-weight:700;margin-top:4px}
+  .footer{text-align:center;font-size:10px;color:#bbb;margin-top:28px;border-top:1px solid #eee;padding-top:8px}
+  @media print{@page{margin:1.2cm}body{padding:0}}
+</style></head><body>
+  <h2>RECU DE VENTE</h2>
+  <p class="sub">Ref #${row?.id} &nbsp;|&nbsp; <span class="badge">Valide</span></p>
+  <div class="grid">
+    <div class="item"><div class="lbl">Date de vente</div><div class="val">${row?.date || "—"}</div></div>
+    <div class="item"><div class="lbl">Fiche de recolte</div><div class="val">${row?.fiche_date || "—"}</div></div>
+    <div class="item"><div class="lbl">Superviseur</div><div class="val">${row?.fiche_superviseur || "—"}${row?.fiche_superviseur_telephone ? ` &nbsp;•&nbsp; ${row.fiche_superviseur_telephone}` : ""}</div></div>
+    <div class="item"><div class="lbl">Client</div><div class="val">${row?.client_nom || row?.client || "—"}</div></div>
+    <div class="item"><div class="lbl">Pesee</div><div class="val">${row?.pesee_kg != null ? `${Number(row.pesee_kg).toLocaleString("fr-FR")} kg` : "—"}</div></div>
+    <div class="item"><div class="lbl">Non conformes</div><div class="val">${row?.non_conformes_pct != null ? `${row.non_conformes_pct} %` : "—"}</div></div>
+    <div class="item"><div class="lbl">Prix calcule</div><div class="val">${row?.prix_calcule != null ? `${Number(row.prix_calcule).toLocaleString("fr-FR")} FCFA/kg` : "—"}</div></div>
+    <div class="item"><div class="lbl">Mode de paiement</div><div class="val">${modeLabel[row?.mode_paiement] || row?.mode_paiement || "—"}</div></div>
+    <div class="item"><div class="lbl">Reference facture</div><div class="val">${row?.reference_facture || "—"}</div></div>
+    ${row?.vehicule_transport ? `<div class="item" style="grid-column:1/-1"><div class="lbl">Vehicule de transport</div><div class="val">${row.vehicule_transport}</div></div>` : ""}
+  </div>
+  <div class="total"><div class="lbl">Montant total</div><div class="val">${fmtNum(row?.montant)} FCFA</div></div>
+  <div class="footer">Document genere le ${new Date().toLocaleDateString("fr-FR")} — Gestion Palmeraie</div>
+</body></html>`;
+    const win = window.open("", "_blank", "width=640,height=820");
+    win.document.write(html);
+    win.document.close();
+    win.focus();
+    setTimeout(() => { win.print(); }, 400);
+  };
+
   return (
     <div className="dialog-backdrop" onClick={onClose}>
-      <div className="dialog" style={{ padding: 0, overflow: "hidden", maxWidth: 540, width: "95%" }}
+      <div className="dialog" style={{ padding: 0, overflow: "hidden", maxWidth: 540, width: "95%", display: "flex", flexDirection: "column" }}
         onClick={(e) => e.stopPropagation()}>
 
-        <div style={{ background: "linear-gradient(135deg, #1f4e79 0%, #2e7d32 100%)", padding: "18px 20px 14px", color: "#fff", position: "relative" }}>
-          <div style={{ fontWeight: 700, fontSize: 15 }}>{row ? "Modifier le recu de vente" : "Nouveau recu de vente"}</div>
-          <div style={{ fontSize: 12, opacity: 0.85, marginTop: 2 }}>{row ? `Recu #${row.id}` : "Rattacher a une fiche de recolte"}</div>
+        <div style={{ background: "linear-gradient(135deg, #1f4e79 0%, #2e7d32 100%)", padding: "18px 20px 14px", color: "#fff", position: "relative", flexShrink: 0 }}>
+          <div style={{ fontWeight: 700, fontSize: 15 }}>
+            {row ? (isAdmin ? "Recu de vente (lecture seule)" : "Modifier le recu de vente") : "Nouveau recu de vente"}
+          </div>
+          <div style={{ fontSize: 12, opacity: 0.85, marginTop: 2, display: "flex", alignItems: "center", gap: 8 }}>
+            {row ? (
+              <>
+                Recu #{row.id}
+                <span style={{
+                  background: row.statut === "valide" ? "rgba(46,125,50,0.45)" : "rgba(245,127,23,0.45)",
+                  color: "#fff", padding: "1px 9px", borderRadius: 10, fontWeight: 700, fontSize: 11,
+                }}>
+                  {row.statut === "valide" ? "Validé" : "Brouillon"}
+                </span>
+              </>
+            ) : "Rattacher a une fiche de recolte"}
+          </div>
           <button onClick={onClose} style={{ position: "absolute", top: 12, right: 12, background: "rgba(255,255,255,0.2)", border: "none", borderRadius: 6, color: "#fff", padding: "4px 10px", cursor: "pointer", fontSize: 12, fontWeight: 600 }}>✕</button>
         </div>
 
-        <div style={{ padding: "18px 20px", maxHeight: "65vh", overflowY: "auto" }}>
-          {/* Fiche */}
-          <div className="mfield" style={{ marginBottom: 12 }}>
-            <label className="mfield-label">Fiche de recolte <span style={{ color: "#d32f2f" }}>*</span></label>
-            <select className={`mfield-input${errors.fiche ? " mfield-input--error" : ""}`}
-              value={form.fiche} onChange={(e) => set("fiche", e.target.value)}>
-              <option value="">-- Choisir une fiche --</option>
-              {ficheOptions.map((f) => (
-                <option key={f.id} value={f.id}>
-                  {f.date} — {f.superviseur_general || f.created_by_username || `#${f.id}`}
-                  {f.total_regimes ? ` · ${Number(f.total_regimes).toLocaleString("fr-FR")} régimes` : ""}
-                  {f.nb_recolteurs ? ` · ${f.nb_recolteurs} récolteur${f.nb_recolteurs > 1 ? "s" : ""}` : ""}
-                </option>
-              ))}
-            </select>
-            {errors.fiche && <span className="mfield-error">{errors.fiche}</span>}
+        {isAdmin && row && (
+          <div style={{ background: "#fff3e0", borderBottom: "1px solid #ffe0b2", padding: "8px 20px", fontSize: 12, color: "#e65100", display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
+            {row.statut === "valide"
+              ? <><strong>Reçu validé</strong> — lecture seule. Pour corriger, supprimez ce reçu et recréez-en un.</>
+              : <>Lecture seule — la modification des reçus est réservée aux superviseurs.</>
+            }
           </div>
+        )}
 
-          {/* Date vente */}
-          <div className="mfield" style={{ marginBottom: 12 }}>
-            <label className="mfield-label">Date de vente <span style={{ color: "#d32f2f" }}>*</span></label>
-            <input type="date" className={`mfield-input${errors.date ? " mfield-input--error" : ""}`}
-              value={form.date} onChange={(e) => set("date", e.target.value)} />
-            {errors.date && <span className="mfield-error">{errors.date}</span>}
-          </div>
+        <div style={{ padding: "18px 20px", overflowY: "auto", flex: "1 1 0", minHeight: 0 }}>
+          {(() => {
+            const ro = isAdmin && !!row;
+            const roStyle = { background: "#f5f5f5", color: "#444", cursor: "default" };
+            return (
+              <>
+                {/* Fiche */}
+                <div className="mfield" style={{ marginBottom: 12 }}>
+                  <label className="mfield-label">Fiche de recolte <span style={{ color: "#d32f2f" }}>*</span></label>
+                  <select className={`mfield-input${errors.fiche ? " mfield-input--error" : ""}`}
+                    value={form.fiche} onChange={(e) => set("fiche", e.target.value)}
+                    disabled={ro} style={ro ? roStyle : undefined}>
+                    <option value="">-- Choisir une fiche --</option>
+                    {ficheOptions.map((f) => (
+                      <option key={f.id} value={f.id}>
+                        {f.date} — {f.superviseur_general || f.created_by_username || `#${f.id}`}
+                        {f.total_regimes ? ` · ${Number(f.total_regimes).toLocaleString("fr-FR")} régimes` : ""}
+                        {f.nb_recolteurs ? ` · ${f.nb_recolteurs} récolteur${f.nb_recolteurs > 1 ? "s" : ""}` : ""}
+                      </option>
+                    ))}
+                  </select>
+                  {errors.fiche && <span className="mfield-error">{errors.fiche}</span>}
+                </div>
 
-          {/* Client */}
-          <div className="mfield" style={{ marginBottom: 12 }}>
-            <label className="mfield-label">Client</label>
-            <select className="mfield-input" value={form.client_obj} onChange={(e) => {
-              const id = e.target.value;
-              const found = (clientsList || []).find((c) => String(c.id) === String(id));
-              set("client_obj", id);
-              set("client", found ? found.nom : "");
-            }}>
-              <option value="">-- Choisir un client --</option>
-              {(clientsList || []).map((c) => (
-                <option key={c.id} value={c.id}>{c.nom}</option>
-              ))}
-            </select>
-          </div>
+                {/* Superviseur (lecture seule, avec téléphone en surbrillance) */}
+                {row?.fiche_superviseur && (
+                  <div style={{ background: "#e3f2fd", border: "1px solid #90caf9", borderRadius: 6, padding: "8px 12px", marginBottom: 12, fontSize: 13, color: "#1565c0", display: "flex", alignItems: "center", flexWrap: "wrap", gap: 8 }}>
+                    <strong>Superviseur :</strong> {row.fiche_superviseur}
+                    {row.fiche_superviseur_telephone && (
+                      <span style={{ fontSize: 12, fontWeight: 700, background: "#e3f2fd", color: "#1565c0", padding: "2px 8px", borderRadius: 10, border: "1px solid #90caf9" }}>
+                        📞 {row.fiche_superviseur_telephone}
+                      </span>
+                    )}
+                  </div>
+                )}
 
-          {/* Pesée + Non conformes */}
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 12 }}>
-            <div className="mfield">
-              <label className="mfield-label">Pesee (kg)</label>
-              <input type="number" min="0" step="0.01" className="mfield-input"
-                value={form.pesee_kg} onChange={(e) => set("pesee_kg", e.target.value)} />
-            </div>
-            <div className="mfield">
-              <label className="mfield-label">Non conformes (%)</label>
-              <input type="number" min="0" max="100" step="0.01" className="mfield-input"
-                value={form.non_conformes_pct} onChange={(e) => set("non_conformes_pct", e.target.value)} />
-            </div>
-          </div>
+                {/* Date vente */}
+                <div className="mfield" style={{ marginBottom: 12 }}>
+                  <label className="mfield-label">Date de vente <span style={{ color: "#d32f2f" }}>*</span></label>
+                  <input type="date" className={`mfield-input${errors.date ? " mfield-input--error" : ""}`}
+                    value={form.date} onChange={(e) => set("date", e.target.value)}
+                    readOnly={ro} style={ro ? roStyle : undefined} />
+                  {errors.date && <span className="mfield-error">{errors.date}</span>}
+                </div>
 
-          {/* Montant */}
-          <div className="mfield" style={{ marginBottom: 12 }}>
-            <label className="mfield-label">Montant (FCFA) <span style={{ color: "#d32f2f" }}>*</span></label>
-            <input type="number" min="0" className={`mfield-input${errors.montant ? " mfield-input--error" : ""}`}
-              value={form.montant} onChange={(e) => set("montant", e.target.value)} />
-            {errors.montant && <span className="mfield-error">{errors.montant}</span>}
-          </div>
+                {/* Client */}
+                <div className="mfield" style={{ marginBottom: 12 }}>
+                  <label className="mfield-label">Client</label>
+                  <select className="mfield-input" value={form.client_obj}
+                    onChange={(e) => {
+                      const id = e.target.value;
+                      const found = (clientsList || []).find((c) => String(c.id) === String(id));
+                      set("client_obj", id);
+                      set("client", found ? found.nom : "");
+                    }}
+                    disabled={ro} style={ro ? roStyle : undefined}>
+                    <option value="">-- Choisir un client --</option>
+                    {(clientsList || []).map((c) => (
+                      <option key={c.id} value={c.id}>{c.nom}</option>
+                    ))}
+                  </select>
+                </div>
 
-          {/* Prix calculé (lecture seule) */}
-          {prixCalcule && (
-            <div style={{ background: "#e8f5e9", border: "1px solid #a5d6a7", borderRadius: 6, padding: "8px 12px", marginBottom: 12, fontSize: 13 }}>
-              <strong>Prix calcule :</strong> {Number(prixCalcule).toLocaleString("fr-FR")} FCFA/kg
-              {rapport && isAdmin && (
-                <span style={{ marginLeft: 16 }}>
-                  <strong>Rapport :</strong>{" "}
-                  <span style={{ color: Number(rapport) >= 1 ? "#2e7d32" : "#c62828", fontWeight: 700 }}>{rapport}</span>
-                </span>
-              )}
-            </div>
-          )}
+                {/* Pesée + Non conformes */}
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 12 }}>
+                  <div className="mfield">
+                    <label className="mfield-label">Pesee (kg)</label>
+                    <input type="number" min="0" step="0.01" className="mfield-input"
+                      value={form.pesee_kg} onChange={(e) => set("pesee_kg", e.target.value)}
+                      readOnly={ro} style={ro ? roStyle : undefined} />
+                  </div>
+                  <div className="mfield">
+                    <label className="mfield-label">Non conformes (%)</label>
+                    <input type="number" min="0" max="100" step="0.01" className="mfield-input"
+                      value={form.non_conformes_pct} onChange={(e) => set("non_conformes_pct", e.target.value)}
+                      readOnly={ro} style={ro ? roStyle : undefined} />
+                  </div>
+                </div>
 
-          {/* Prix officiel — admin uniquement */}
-          {isAdmin && (
-            <div className="mfield" style={{ marginBottom: 12 }}>
-              <label className="mfield-label">Prix officiel (FCFA/kg) <span style={{ fontSize: 11, color: "#888" }}>(admin)</span></label>
-              <input type="number" min="0" step="0.01" className="mfield-input"
-                value={form.prix_officiel} onChange={(e) => set("prix_officiel", e.target.value)} />
-            </div>
-          )}
+                {/* Montant */}
+                {(() => {
+                  const montantVerrouille = ro || (!isAdmin && form.prix_officiel && Number(form.prix_officiel) > 0);
+                  return (
+                    <div className="mfield" style={{ marginBottom: 12 }}>
+                      <label className="mfield-label">
+                        Montant (FCFA) <span style={{ color: "#d32f2f" }}>*</span>
+                        {!ro && montantVerrouille && <span style={{ fontSize: 11, color: "#888", marginLeft: 6 }}>(calcule automatiquement)</span>}
+                      </label>
+                      <input
+                        type="number" min="0" step="1" inputMode="numeric"
+                        className={`mfield-input${errors.montant ? " mfield-input--error" : ""}`}
+                        value={form.montant}
+                        onChange={(e) => set("montant", e.target.value)}
+                        readOnly={montantVerrouille}
+                        style={montantVerrouille ? roStyle : {}}
+                      />
+                      {errors.montant && <span className="mfield-error">{errors.montant}</span>}
+                    </div>
+                  );
+                })()}
 
-          {/* Référence + Mode paiement + Véhicule */}
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 12 }}>
-            <div className="mfield">
-              <label className="mfield-label">Reference facture</label>
-              <input className="mfield-input" value={form.reference_facture}
-                onChange={(e) => set("reference_facture", e.target.value)} />
-            </div>
-            <div className="mfield">
-              <label className="mfield-label">Mode de paiement</label>
-              <select className="mfield-input" value={form.mode_paiement || ""}
-                onChange={(e) => set("mode_paiement", e.target.value || null)}>
-                <option value="">--</option>
-                <option value="espece">Espece</option>
-                <option value="virement">Virement</option>
-              </select>
-            </div>
-          </div>
-          <div className="mfield" style={{ marginBottom: 4 }}>
-            <label className="mfield-label">Vehicule de transport</label>
-            <input className="mfield-input" value={form.vehicule_transport}
-              onChange={(e) => set("vehicule_transport", e.target.value)} />
-          </div>
+                {/* Prix calculé */}
+                {prixCalcule && (
+                  <div style={{ background: "#e8f5e9", border: "1px solid #a5d6a7", borderRadius: 6, padding: "8px 12px", marginBottom: 12, fontSize: 13 }}>
+                    <strong>Prix calcule :</strong> {Number(prixCalcule).toLocaleString("fr-FR")} FCFA/kg
+                    {rapport && isAdmin && (
+                      <span style={{ marginLeft: 16 }}>
+                        <strong>Rapport :</strong>{" "}
+                        <span style={{ color: Number(rapport) >= 1 ? "#2e7d32" : "#c62828", fontWeight: 700 }}>{rapport}</span>
+                      </span>
+                    )}
+                  </div>
+                )}
+
+                {/* Prix officiel */}
+                {isAdmin ? (
+                  <div className="mfield" style={{ marginBottom: 12 }}>
+                    <label className="mfield-label">Prix officiel (FCFA/kg)</label>
+                    <input type="number" min="0" step="1" className="mfield-input"
+                      value={form.prix_officiel} onChange={(e) => set("prix_officiel", e.target.value)}
+                      readOnly={ro} style={ro ? roStyle : undefined} />
+                  </div>
+                ) : form.prix_officiel ? (
+                  <div style={{ background: "#e3f2fd", border: "1px solid #90caf9", borderRadius: 6, padding: "8px 12px", marginBottom: 12, fontSize: 13, color: "#1565c0" }}>
+                    <strong>Prix officiel :</strong> {Number(form.prix_officiel).toLocaleString("fr-FR")} FCFA/kg
+                    <span style={{ fontSize: 11, marginLeft: 8, opacity: 0.7 }}>(fixe par l'administrateur)</span>
+                  </div>
+                ) : null}
+
+                {/* Référence + Mode paiement + Véhicule */}
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 12 }}>
+                  <div className="mfield">
+                    <label className="mfield-label">Reference facture</label>
+                    <input className="mfield-input" value={form.reference_facture}
+                      onChange={(e) => set("reference_facture", e.target.value)}
+                      readOnly={ro} style={ro ? roStyle : undefined} />
+                  </div>
+                  <div className="mfield">
+                    <label className="mfield-label">Mode de paiement</label>
+                    <select className="mfield-input" value={form.mode_paiement || ""}
+                      onChange={(e) => set("mode_paiement", e.target.value || null)}
+                      disabled={ro} style={ro ? roStyle : undefined}>
+                      <option value="">--</option>
+                      <option value="espece">Espece</option>
+                      <option value="virement">Virement</option>
+                    </select>
+                  </div>
+                </div>
+                <div className="mfield" style={{ marginBottom: 4 }}>
+                  <label className="mfield-label">Vehicule de transport</label>
+                  <input className="mfield-input" value={form.vehicule_transport}
+                    onChange={(e) => set("vehicule_transport", e.target.value)}
+                    readOnly={ro} style={ro ? roStyle : undefined} />
+                </div>
+              </>
+            );
+          })()}
         </div>
 
-        <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, padding: "14px 20px", borderTop: "1px solid #f0f0f0", background: "#fafafa" }}>
+        <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, padding: "14px 20px", borderTop: "1px solid #f0f0f0", background: "#fafafa", flexShrink: 0 }}>
           <button type="button" onClick={onClose} style={{ padding: "8px 18px", borderRadius: 6, border: "1px solid #ddd", background: "#fff", cursor: "pointer", fontSize: 13, color: "#555" }}>
-            Annuler
+            {isAdmin && row ? "Fermer" : "Annuler"}
           </button>
-          <button type="button" onClick={submit} disabled={saving} style={{ padding: "8px 20px", borderRadius: 6, border: "none", background: "linear-gradient(135deg, #1f4e79, #2e7d32)", color: "#fff", fontWeight: 700, cursor: saving ? "not-allowed" : "pointer", fontSize: 13, opacity: saving ? 0.7 : 1 }}>
-            {saving ? "Enregistrement..." : row ? "Mettre a jour" : "Enregistrer"}
-          </button>
+          {row?.statut === "valide" && (
+            <button type="button" onClick={handlePrint} style={{ padding: "8px 18px", borderRadius: 6, border: "1px solid #1565c0", background: "#e3f2fd", color: "#1565c0", cursor: "pointer", fontSize: 13, fontWeight: 600 }}>
+              Imprimer
+            </button>
+          )}
+          {!(isAdmin && row) && (
+            <button type="button" onClick={submit} disabled={saving} style={{ padding: "8px 20px", borderRadius: 6, border: "none", background: "linear-gradient(135deg, #1f4e79, #2e7d32)", color: "#fff", fontWeight: 700, cursor: saving ? "not-allowed" : "pointer", fontSize: 13, opacity: saving ? 0.7 : 1 }}>
+              {saving ? "Enregistrement..." : row ? "Mettre a jour" : "Enregistrer"}
+            </button>
+          )}
         </div>
       </div>
     </div>
@@ -277,11 +411,13 @@ export default function HistoriqueRecoltes() {
   const [success, setSuccess] = useState({ open: false, message: "" });
   const [editingFicheId, setEditingFicheId] = useState(null);
   const [confirmValidate, setConfirmValidate] = useState({ open: false, ficheId: null });
+  const [confirmRejet, setConfirmRejet] = useState({ open: false, ficheId: null, motif: "" });
   const [historyFilter, setHistoryFilter] = useState("all");
 
   // ── Ventes ───────────────────────────────────────────────────────────────
   const currentYear = new Date().getFullYear();
   const [baremeDefaut, setBaremeDefaut] = useState({ grands: 60, moyens: 50, petits: 25 });
+  const [prixOfficielGlobal, setPrixOfficielGlobal] = useState(null);
 
   const [ventesRows, setVentesRows] = useState([]);
   const [loadingVentes, setLoadingVentes] = useState(false);
@@ -290,6 +426,8 @@ export default function HistoriqueRecoltes() {
   const [venteSaving, setVenteSaving] = useState(false);
   const [venteToDelete, setVenteToDelete] = useState(null);
   const [venteToValidate, setVenteToValidate] = useState(null);
+  const [venteToReject, setVenteToReject] = useState({ open: false, row: null, motif: "" });
+  const [ficheToDelete, setFicheToDelete] = useState(null);
   const [venteSearch, setVenteSearch] = useState("");
   const ventesYears = Array.from({ length: 5 }, (_, i) => currentYear - i);
 
@@ -346,6 +484,31 @@ export default function HistoriqueRecoltes() {
       pushToast({ type: "error", title: "Ventes", message: err.message });
     } finally {
       setVenteToValidate(null);
+    }
+  };
+
+  const handleDeleteFiche = async () => {
+    try {
+      await deleteFiche(ficheToDelete.id);
+      setHistory((prev) => prev.filter((f) => f.id !== ficheToDelete.id));
+      if (!isAdmin) setPendingCount((prev) => Math.max(0, prev - 1));
+      pushToast({ type: "success", title: "Fiche", message: "Fiche supprimee." });
+    } catch (err) {
+      pushToast({ type: "error", title: "Fiche", message: err.message });
+    } finally {
+      setFicheToDelete(null);
+    }
+  };
+
+  const handleVenteReject = async () => {
+    try {
+      const updated = await rejeterRecu(venteToReject.row.id, venteToReject.motif);
+      setVentesRows((prev) => prev.map((r) => r.id === updated.id ? updated : r));
+      pushToast({ type: "success", title: "Ventes", message: "Recu rejete." });
+    } catch (err) {
+      pushToast({ type: "error", title: "Ventes", message: err.message });
+    } finally {
+      setVenteToReject({ open: false, row: null, motif: "" });
     }
   };
 
@@ -610,7 +773,8 @@ export default function HistoriqueRecoltes() {
     if (!isAdmin && currentUserDisplayName) {
       setFiche((prev) => ({ ...prev, superviseurGeneral: currentUserDisplayName }));
     }
-    // Charger le barème par défaut depuis les paramètres admin
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // Charger le barème et le prix officiel depuis les paramètres admin
     getParametreBonus().then((data) => {
       const rows = Array.isArray(data) ? data : (data.results || [data]);
       const obj = rows[0] || {};
@@ -621,8 +785,26 @@ export default function HistoriqueRecoltes() {
       };
       setBaremeDefaut(defaut);
       setFiche((prev) => ({ ...prev, bareme: defaut }));
+      if (obj.prix_kg_officiel != null) {
+        setPrixOfficielGlobal(Number(obj.prix_kg_officiel));
+      }
     }).catch(() => {/* silencieux */});
   }, []);
+
+  // Pre-fill superviseurGeneralId pour que le FK soit envoyé à l'API (et le téléphone récupérable)
+  useEffect(() => {
+    if (isAdmin || !user || superviseursList.length === 0) return;
+    const userLast = (user.last_name || "").toLowerCase().trim();
+    const userFirst = (user.first_name || "").toLowerCase().trim();
+    const found = superviseursList.find((s) => {
+      const supNom = (s.nom || "").toLowerCase().trim();
+      const supPrenom = (s.prenom || "").toLowerCase().trim();
+      return supNom === userLast && (!userFirst || !supPrenom || supPrenom === userFirst);
+    });
+    if (found) {
+      setFiche((prev) => ({ ...prev, superviseurGeneralId: found.id }));
+    }
+  }, [superviseursList, user, isAdmin]);
 
   useEffect(() => {
     if (tab !== "analyses") return;
@@ -974,9 +1156,11 @@ export default function HistoriqueRecoltes() {
     }
   };
 
-  const handleStatutChange = async (ficheId, newStatut) => {
+  const handleStatutChange = async (ficheId, newStatut, motif = "") => {
     try {
-      await patchFiche(ficheId, { statut: newStatut });
+      const payload = { statut: newStatut };
+      if (motif && motif.trim()) payload.motif = motif.trim();
+      await patchFiche(ficheId, payload);
       const now = new Date().toISOString();
       setHistory((prev) => {
         const next = prev.map((f) =>
@@ -988,6 +1172,10 @@ export default function HistoriqueRecoltes() {
                   validated_by_display: currentUserDisplayName || f.validated_by_display,
                   validated_at: now,
                 }),
+                ...(newStatut === "brouillon" && {
+                  validated_by_display: null,
+                  validated_at: null,
+                }),
               }
             : f
         );
@@ -996,7 +1184,7 @@ export default function HistoriqueRecoltes() {
         }
         return next;
       });
-      const labels = { valide: "validee" };
+      const labels = { valide: "validee", brouillon: "rejetee" };
       pushToast({ type: "success", title: "Fiche", message: `Fiche ${labels[newStatut] || newStatut}` });
     } catch (err) {
       pushToast({ type: "error", title: "Statut", message: err.message });
@@ -1011,6 +1199,16 @@ export default function HistoriqueRecoltes() {
     const { ficheId } = confirmValidate;
     setConfirmValidate({ open: false, ficheId: null });
     handleStatutChange(ficheId, "valide");
+  };
+
+  const handleConfirmRejet = (ficheId) => {
+    setConfirmRejet({ open: true, ficheId, motif: "" });
+  };
+
+  const handleConfirmRejetOk = () => {
+    const { ficheId, motif } = confirmRejet;
+    setConfirmRejet({ open: false, ficheId: null, motif: "" });
+    handleStatutChange(ficheId, "brouillon", motif);
   };
 
   const handleExport = async () => {
@@ -1072,12 +1270,28 @@ export default function HistoriqueRecoltes() {
       + " " + d.toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" });
   };
 
-  // Colonnes admin : uniquement les fiches validées, avec traçabilité validation
+  // Colonnes admin : fiches soumises et validées, avec traçabilité validation
   const adminColumns = [
     { key: "date", label: "Date récolte" },
     { key: "superviseur_general", label: "Superviseur", render: (row) => row.superviseur_general || "-" },
     { key: "total_regimes", label: "Total régimes" },
     { key: "nb_recolteurs", label: "Récolteurs" },
+    {
+      key: "statut",
+      label: "Statut",
+      render: (row) => {
+        const cfg = row.statut === "valide"
+          ? { bg: "#c8e6c9", color: "#1b5e20", label: "Validée" }
+          : row.statut === "soumis"
+          ? { bg: "#fff9c4", color: "#f57f17", label: "Soumise" }
+          : { bg: "#f5f5f5", color: "#757575", label: "Brouillon" };
+        return (
+          <span style={{ display: "inline-block", padding: "2px 10px", borderRadius: 12, fontSize: 12, fontWeight: 700, background: cfg.bg, color: cfg.color }}>
+            {cfg.label}
+          </span>
+        );
+      },
+    },
     {
       key: "validated_by_display",
       label: "Validée par",
@@ -1094,6 +1308,22 @@ export default function HistoriqueRecoltes() {
       render: (row) => (
         <div className="row-actions">
           <button onClick={() => setSelectedFiche(row)}>Voir</button>
+          {row.statut === "soumis" && (
+            <button
+              className="btn-primary btn-sm"
+              onClick={() => handleConfirmValider(row.id)}
+            >
+              Valider
+            </button>
+          )}
+          {(row.statut === "soumis" || row.statut === "valide") && (
+            <button
+              className="btn-danger btn-sm"
+              onClick={() => handleConfirmRejet(row.id)}
+            >
+              Rejeter
+            </button>
+          )}
         </div>
       ),
     },
@@ -1148,6 +1378,14 @@ export default function HistoriqueRecoltes() {
                 Valider
               </button>
             )}
+            {nonValide && (
+              <button
+                className="btn-danger btn-sm"
+                onClick={() => setFicheToDelete(row)}
+              >
+                Supprimer
+              </button>
+            )}
           </div>
         );
       },
@@ -1155,9 +1393,7 @@ export default function HistoriqueRecoltes() {
   ];
 
   const historyColumns = isAdmin ? adminColumns : superviseurColumns;
-  const displayRows = isAdmin
-    ? historyRows.filter((r) => r.statut === "valide")
-    : historyRows;
+  const displayRows = historyRows;
 
   // Filtres pour le superviseur
   const pendingRows = displayRows.filter((r) => r.statut !== "valide");
@@ -1252,7 +1488,17 @@ export default function HistoriqueRecoltes() {
             <button className="btn-ghost" onClick={() => loadVentes(ventesYear)} disabled={loadingVentes}>
               {loadingVentes ? "Chargement..." : "Rafraichir"}
             </button>
-            <button className="btn-primary" onClick={() => setVenteDialog({ open: true, row: null })}>
+            <button
+              className="btn-primary"
+              style={(!isAdmin && !hasPermission("gerer_recus_vente")) ? { opacity: 0.45, cursor: "not-allowed" } : {}}
+              onClick={() => {
+                if (!isAdmin && !hasPermission("gerer_recus_vente")) {
+                  pushToast({ type: "warning", title: "Accès refusé", message: "L'administrateur vous a retiré ce droit." });
+                  return;
+                }
+                setVenteDialog({ open: true, row: null });
+              }}
+            >
               + Nouveau recu
             </button>
           </div>
@@ -1863,7 +2109,7 @@ export default function HistoriqueRecoltes() {
                 <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
                   <thead>
                     <tr style={{ background: "#1f4e79", color: "#fff" }}>
-                      {["Statut", "Date recolte", "Date vente", "Client", "Pesee (kg)", "Non conformes (%)", "Montant (FCFA)", "Prix calcule (FCFA/kg)", isAdmin ? "Prix officiel (FCFA/kg)" : null, isAdmin ? "Rapport" : null, "Actions"].filter(Boolean).map((h) => (
+                      {["Statut", "Date recolte", "Superviseur", "Date vente", "Client", "Pesee (kg)", "Non conformes (%)", "Montant (FCFA)", "Prix calcule (FCFA/kg)", isAdmin ? "Prix officiel (FCFA/kg)" : null, isAdmin ? "Rapport" : null, "Actions"].filter(Boolean).map((h) => (
                         <th key={h} style={{ padding: "10px 12px", textAlign: "left", fontWeight: 600, whiteSpace: "nowrap" }}>{h}</th>
                       ))}
                     </tr>
@@ -1884,11 +2130,12 @@ export default function HistoriqueRecoltes() {
                             </span>
                           </td>
                           <td style={{ padding: "8px 12px" }}>{row.fiche_date || "—"}</td>
+                          <td style={{ padding: "8px 12px" }}>{row.fiche_superviseur || "—"}</td>
                           <td style={{ padding: "8px 12px" }}>{row.date || "—"}</td>
                           <td style={{ padding: "8px 12px" }}>{row.client_nom || row.client || "—"}</td>
                           <td style={{ padding: "8px 12px" }}>{row.pesee_kg != null ? Number(row.pesee_kg).toLocaleString("fr-FR") : "—"}</td>
                           <td style={{ padding: "8px 12px" }}>{row.non_conformes_pct != null ? `${row.non_conformes_pct} %` : "—"}</td>
-                          <td style={{ padding: "8px 12px", fontWeight: 600 }}>{row.montant != null ? Number(row.montant).toLocaleString("fr-FR") : "—"}</td>
+                          <td style={{ padding: "8px 12px", fontWeight: 600 }}>{row.montant != null ? Number(row.montant).toLocaleString("fr-FR", { maximumFractionDigits: 0 }) : "—"}</td>
                           <td style={{ padding: "8px 12px" }}>{row.prix_calcule != null ? Number(row.prix_calcule).toLocaleString("fr-FR") : "—"}</td>
                           {isAdmin && <td style={{ padding: "8px 12px", color: row.prix_officiel ? "#2e7d32" : "#aaa" }}>{row.prix_officiel ? Number(row.prix_officiel).toLocaleString("fr-FR") : "—"}</td>}
                           {isAdmin && (
@@ -1901,18 +2148,23 @@ export default function HistoriqueRecoltes() {
                             </td>
                           )}
                           <td style={{ padding: "8px 12px" }}>
-                            <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-                              {isAdmin && !isValide && (
+                            <div style={{ display: "flex", gap: 6, flexWrap: "nowrap", alignItems: "center" }}>
+                              {!isAdmin && !isValide && (
                                 <button className="btn-success btn-sm" onClick={() => setVenteToValidate(row)}>
                                   Valider
                                 </button>
                               )}
                               {canEdit && (
                                 <button className="btn-secondary btn-sm" onClick={() => setVenteDialog({ open: true, row })}>
-                                  Modifier
+                                  {isAdmin ? "Voir" : "Modifier"}
                                 </button>
                               )}
-                              {canEdit && (
+                              {isValide && isAdmin && (
+                                <button className="btn-danger btn-sm" onClick={() => setVenteToReject({ open: true, row, motif: "" })}>
+                                  Rejeter
+                                </button>
+                              )}
+                              {!isValide && !isAdmin && (
                                 <button className="btn-danger btn-sm" onClick={() => setVenteToDelete(row)}>
                                   Supprimer
                                 </button>
@@ -1939,6 +2191,7 @@ export default function HistoriqueRecoltes() {
           open={venteDialog.open}
           row={venteDialog.row}
           isAdmin={isAdmin}
+          prixOfficielGlobal={prixOfficielGlobal}
           historyRows={historyRows}
           clientsList={clientsList}
           saving={venteSaving}
@@ -1956,7 +2209,7 @@ export default function HistoriqueRecoltes() {
               Confirmer la validation du recu du <strong>{venteToValidate.date}</strong> pour <strong>{venteToValidate.client_nom || venteToValidate.client || "client inconnu"}</strong> ?
             </p>
             <p style={{ fontSize: 12, color: "#f57f17", margin: "0 0 20px" }}>
-              Une fois valide, seul l'administrateur pourra modifier ou supprimer ce recu.
+              Une fois valide, seul l'administrateur pourra rejeter ce recu.
             </p>
             <div className="dialog-actions">
               <button className="btn-ghost" onClick={() => setVenteToValidate(null)}>Annuler</button>
@@ -1978,6 +2231,51 @@ export default function HistoriqueRecoltes() {
             <div className="dialog-actions">
               <button className="btn-ghost" onClick={() => setVenteToDelete(null)}>Annuler</button>
               <button className="btn-danger" onClick={handleVenteDelete}>Supprimer</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Confirmation rejet recu */}
+      {venteToReject.open && (
+        <div className="dialog-backdrop" onClick={() => setVenteToReject({ open: false, row: null, motif: "" })}>
+          <div className="dialog dialog-sm" onClick={(e) => e.stopPropagation()}>
+            <h3 style={{ color: "#b71c1c" }}>Rejeter le recu</h3>
+            <p style={{ fontSize: 14, color: "#555", margin: "12px 0 4px" }}>
+              Rejeter le recu du <strong>{venteToReject.row?.date}</strong> pour{" "}
+              <strong>{venteToReject.row?.client_nom || venteToReject.row?.client || "client inconnu"}</strong> ?
+            </p>
+            <p style={{ fontSize: 12, color: "#f57f17", margin: "0 0 12px" }}>
+              Le statut repassera a Brouillon et le superviseur sera notifie.
+            </p>
+            <label style={{ fontSize: 13, fontWeight: 600, color: "#333" }}>Motif du rejet</label>
+            <textarea
+              rows={3}
+              style={{ width: "100%", marginTop: 6, marginBottom: 16, padding: "8px 10px", fontSize: 13, borderRadius: 6, border: "1px solid #ccc", resize: "vertical", boxSizing: "border-box" }}
+              placeholder="Saisir le motif du rejet (optionnel)..."
+              value={venteToReject.motif}
+              onChange={(e) => setVenteToReject((prev) => ({ ...prev, motif: e.target.value }))}
+            />
+            <div className="dialog-actions">
+              <button className="btn-ghost" onClick={() => setVenteToReject({ open: false, row: null, motif: "" })}>Annuler</button>
+              <button className="btn-danger" onClick={handleVenteReject}>Oui, rejeter</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Confirmation suppression fiche recolte */}
+      {ficheToDelete && (
+        <div className="dialog-backdrop" onClick={() => setFicheToDelete(null)}>
+          <div className="dialog dialog-sm" onClick={(e) => e.stopPropagation()}>
+            <h3 style={{ color: "#b71c1c" }}>Supprimer la fiche</h3>
+            <p style={{ fontSize: 14, color: "#555", margin: "12px 0 20px" }}>
+              Supprimer la fiche du <strong>{ficheToDelete.date}</strong> ?
+              Cette action est irreversible.
+            </p>
+            <div className="dialog-actions">
+              <button className="btn-ghost" onClick={() => setFicheToDelete(null)}>Annuler</button>
+              <button className="btn-danger" onClick={handleDeleteFiche}>Supprimer</button>
             </div>
           </div>
         </div>
@@ -2028,6 +2326,38 @@ export default function HistoriqueRecoltes() {
               </button>
               <button className="btn-primary" onClick={handleConfirmOk}>
                 Oui, valider
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Dialog de confirmation de rejet */}
+      {confirmRejet.open && (
+        <div className="dialog-backdrop" onClick={() => setConfirmRejet({ open: false, ficheId: null, motif: "" })}>
+          <div className="dialog dialog-sm" onClick={(e) => e.stopPropagation()}>
+            <h3>Confirmer le rejet</h3>
+            <p style={{ fontSize: 14, color: "#555", margin: "12px 0 12px" }}>
+              Rejeter cette fiche la replacera en brouillon. Le superviseur concerne en sera notifie
+              et pourra la corriger avant de la soumettre a nouveau.
+            </p>
+            <div className="mfield" style={{ marginBottom: 16 }}>
+              <label className="mfield-label">Motif du rejet <span style={{ color: "#888", fontWeight: 400 }}>(optionnel)</span></label>
+              <textarea
+                className="mfield-input"
+                rows={3}
+                style={{ resize: "vertical", fontSize: 13 }}
+                placeholder="Ex : données manquantes, quantités incorrectes..."
+                value={confirmRejet.motif}
+                onChange={(e) => setConfirmRejet((prev) => ({ ...prev, motif: e.target.value }))}
+              />
+            </div>
+            <div className="dialog-actions">
+              <button className="btn-ghost" onClick={() => setConfirmRejet({ open: false, ficheId: null, motif: "" })}>
+                Annuler
+              </button>
+              <button className="btn-primary" onClick={handleConfirmRejetOk}>
+                Oui, rejeter
               </button>
             </div>
           </div>

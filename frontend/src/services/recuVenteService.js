@@ -12,6 +12,7 @@ export const createRecuVente   = (payload)     => apiPost(BASE, payload);
 export const updateRecuVente   = (id, payload) => apiPatch(`${BASE}${id}/`, payload);
 export const deleteRecuVente   = (id)          => apiDelete(`${BASE}${id}/`);
 export const validerRecu       = (id)          => apiPost(`${BASE}${id}/valider/`, {});
+export const rejeterRecu       = (id, motif = "") => apiPost(`${BASE}${id}/rejeter/`, { motif });
 
 export const getParametreBonus    = ()          => apiGet(`${BONUS_BASE}`);
 export const updateParametreBonus = (payload)   => apiPatch(`${BONUS_BASE}1/`, payload);

@@ -1,5 +1,5 @@
 import { createContext, useContext, useEffect, useMemo, useState } from "react";
-import { getStoredAuth, login as loginService, logout as logoutService, updateStoredAuth } from "../services/authService.js";
+import { getStoredAuth, login as loginService, logout as logoutService, refreshMe, updateStoredAuth } from "../services/authService.js";
 
 const AuthContext = createContext(null);
 
@@ -9,7 +9,10 @@ export function AuthProvider({ children }) {
 
   useEffect(() => {
     const stored = getStoredAuth();
-    if (stored) setAuth(stored);
+    if (stored?.token) {
+      setAuth(stored);
+      refreshMe().then((fresh) => { if (fresh) setAuth(fresh); });
+    }
     setLoading(false);
   }, []);
 

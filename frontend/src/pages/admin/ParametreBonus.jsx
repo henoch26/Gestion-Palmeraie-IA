@@ -53,9 +53,11 @@ export default function ParametreBonus() {
   const [loading, setLoading]   = useState(true);
   const [savingBar, setSavingBar] = useState(false);
   const [savingBonus, setSavingBonus] = useState(false);
+  const [savingPrix, setSavingPrix] = useState(false);
 
   const [bareme, setBareme] = useState({ grands: "", moyens: "", petits: "" });
   const [bonus, setBonus]   = useState({ seuil_non_conformes: "", montant_bonus: "" });
+  const [prixVente, setPrixVente] = useState({ prix_kg_officiel: "" });
 
   const load = async () => {
     try {
@@ -71,6 +73,9 @@ export default function ParametreBonus() {
       setBonus({
         seuil_non_conformes: obj.seuil_non_conformes ?? "",
         montant_bonus:       obj.montant_bonus ?? "",
+      });
+      setPrixVente({
+        prix_kg_officiel: obj.prix_kg_officiel ?? "",
       });
     } catch (err) {
       pushToast({ type: "error", title: "Parametres", message: err.message });
@@ -126,12 +131,29 @@ export default function ParametreBonus() {
     }
   };
 
+  const savePrix = async () => {
+    const prix = prixVente.prix_kg_officiel === "" ? null : Number(prixVente.prix_kg_officiel);
+    if (prix !== null && (isNaN(prix) || prix < 0)) {
+      pushToast({ type: "error", title: "Validation", message: "Le prix doit etre un nombre positif." });
+      return;
+    }
+    try {
+      setSavingPrix(true);
+      await updateParametreBonus({ prix_kg_officiel: prix });
+      pushToast({ type: "success", title: "Prix officiel", message: "Prix officiel mis a jour." });
+    } catch (err) {
+      pushToast({ type: "error", title: "Prix officiel", message: err.message });
+    } finally {
+      setSavingPrix(false);
+    }
+  };
+
   return (
     <div className="page-container">
       <div className="page-header">
         <div>
           <h2>Parametres generaux</h2>
-          <p className="dashboard-subtitle">Bareme par defaut et bonus qualite</p>
+          <p className="dashboard-subtitle">Bareme par defaut, bonus qualite et prix officiel de vente</p>
         </div>
       </div>
 
@@ -202,6 +224,33 @@ export default function ParametreBonus() {
               onChange={(v) => setBonus((p) => ({ ...p, montant_bonus: v }))}
               unit="FCFA"
             />
+          </SectionCard>
+
+          {/* ── Section Prix officiel de vente ──────────────────────── */}
+          <SectionCard
+            title="Prix officiel de vente"
+            subtitle="Prix du kg fixe par les acteurs agro-industriels. Ce prix est pre-rempli automatiquement dans chaque nouveau recu de vente. Seul l'administrateur peut le modifier."
+            onSave={savePrix}
+            saving={savingPrix}
+          >
+            <NumField
+              label="Prix officiel du kg"
+              value={prixVente.prix_kg_officiel}
+              onChange={(v) => setPrixVente((p) => ({ ...p, prix_kg_officiel: v }))}
+              min={0}
+              step={1}
+              unit="FCFA/kg"
+              hint="Laissez vide si aucun prix officiel n'est defini"
+            />
+            {prixVente.prix_kg_officiel && Number(prixVente.prix_kg_officiel) > 0 && (
+              <div style={{
+                background: "#e8f5e9", border: "1px solid #a5d6a7",
+                borderRadius: 6, padding: "10px 14px", fontSize: 12, color: "#2e7d32",
+              }}>
+                Prix actuel : <strong>{Number(prixVente.prix_kg_officiel).toLocaleString("fr-FR")} FCFA/kg</strong>.
+                Ce prix sera pre-rempli dans tous les prochains recus de vente.
+              </div>
+            )}
           </SectionCard>
 
         </div>

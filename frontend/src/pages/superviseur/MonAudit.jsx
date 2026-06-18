@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { useToast } from "../../context/ToastContext.jsx";
 import { listActionLogs } from "../../services/actionLogService.js";
 import AuditDetailDialog from "../../components/AuditDetailDialog.jsx";
@@ -13,6 +14,7 @@ const ACTION_LABELS = {
   modification_recu:        { label: "Modif. reçu",        color: "#00838f", bg: "#e0f7fa" },
   suppression_recu:         { label: "Suppression reçu",   color: "#b71c1c", bg: "#ffebee" },
   validation_recu:          { label: "Validation reçu",    color: "#1b5e20", bg: "#e8f5e9" },
+  rejet_recu:               { label: "Rejet reçu",          color: "#c62828", bg: "#ffebee" },
   // ── Mes propres actions ─────────────────────────────────────────
   creation_fiche:           { label: "Création fiche",     color: "#0277bd", bg: "#e1f5fe" },
   soumission_fiche:         { label: "Soumission fiche",   color: "#6a1b9a", bg: "#f3e5f5" },
@@ -31,8 +33,12 @@ const ACTION_LABELS = {
   suppression_materiel:     { label: "Suppr. matériel",    color: "#b71c1c", bg: "#ffebee" },
   creation_travaux:         { label: "Créat. travaux",     color: "#0277bd", bg: "#e3f2fd" },
   soumission_travaux:       { label: "Soumis. travaux",    color: "#6a1b9a", bg: "#f3e5f5" },
+  validation_travaux:       { label: "Valid. travaux",     color: "#2e7d32", bg: "#e8f5e9" },
+  rejet_travaux:            { label: "Rejet travaux",      color: "#c62828", bg: "#ffebee" },
   suppression_travaux:      { label: "Suppr. travaux",     color: "#b71c1c", bg: "#ffebee" },
   annulation_action:        { label: "Annulation",         color: "#4a148c", bg: "#f3e5f5" },
+  // ── Gestion de mon compte ───────────────────────────────────────
+  modification_utilisateur: { label: "Modif. compte",      color: "#37474f", bg: "#eceff1" },
 };
 
 const fmtDate = (iso) => {
@@ -45,12 +51,20 @@ const fmtDate = (iso) => {
 
 export default function MonAudit() {
   const { pushToast } = useToast();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [rows, setRows]         = useState([]);
   const [loading, setLoading]   = useState(false);
   const [selectedRow, setSelectedRow] = useState(null);
 
   const today = new Date().toISOString().slice(0, 10);
-  const [filters, setFilters] = useState({ action: "", date_debut: "", date_fin: today });
+
+  // Initialiser les filtres depuis les query params (ex: depuis une notification)
+  const [filters, setFilters] = useState({
+    action:     searchParams.get("action")   || "",
+    date_debut: searchParams.get("date_debut") || "",
+    date_fin:   searchParams.get("date_fin")   || today,
+    fiche_id:   searchParams.get("fiche_id")   || "",
+  });
 
   const load = async (f = filters) => {
     setLoading(true);
@@ -59,8 +73,16 @@ export default function MonAudit() {
       if (f.action)     params.action     = f.action;
       if (f.date_debut) params.date_debut = f.date_debut;
       if (f.date_fin)   params.date_fin   = f.date_fin;
+      if (f.fiche_id)   params.fiche_id   = f.fiche_id;
       const data = await listActionLogs(params);
-      setRows(Array.isArray(data) ? data : (data.results || []));
+      const result = Array.isArray(data) ? data : (data.results || []);
+      setRows(result);
+      // Si on arrive depuis une notification (fiche_id présent), ouvrir le 1er résultat
+      if (f.fiche_id && result.length > 0) {
+        setSelectedRow(result[0]);
+        // Nettoyer les params URL pour ne pas rouvrir au rechargement
+        setSearchParams({}, { replace: true });
+      }
     } catch (err) {
       pushToast({ type: "error", title: "Audit", message: err.message });
     } finally {
@@ -73,7 +95,7 @@ export default function MonAudit() {
   const set = (field, value) => setFilters((p) => ({ ...p, [field]: value }));
 
   const handleReset = () => {
-    const reset = { action: "", date_debut: "", date_fin: today };
+    const reset = { action: "", date_debut: "", date_fin: today, fiche_id: "" };
     setFilters(reset);
     load(reset);
   };
@@ -163,7 +185,7 @@ export default function MonAudit() {
           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
             <thead>
               <tr style={{ background: "#1f4e79", color: "#fff" }}>
-                {["Date & heure", "Action", "Acteur", "Fiche (date)", "Détail", ""].map((h) => (
+                {["Date & heure", "Action", "Acteur", "Détail", ""].map((h) => (
                   <th key={h} style={{ padding: "10px 14px", textAlign: "left", fontWeight: 600, whiteSpace: "nowrap" }}>{h}</th>
                 ))}
               </tr>
@@ -180,7 +202,6 @@ export default function MonAudit() {
                       </span>
                     </td>
                     <td style={{ padding: "9px 14px", fontWeight: 600 }}>{row.acteur_display}</td>
-                    <td style={{ padding: "9px 14px", color: "#555" }}>{row.fiche_date || "—"}</td>
                     <td style={{ padding: "9px 14px", color: "#444", maxWidth: 240 }}>
                       {row.detail_parsed?.label || row.detail || "—"}
                     </td>

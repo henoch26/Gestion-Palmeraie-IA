@@ -96,8 +96,13 @@ class SecteurViewSet(viewsets.ModelViewSet):
         return (
             Secteur.objects.all()
             .annotate(
-                production_total=Coalesce(Sum("details_recolte__quantite"), 0),
-                last_recolte=Max("details_recolte__ligne__fiche__date"),
+                production_total=Coalesce(
+                    Sum("details_recolte__quantite",
+                        filter=Q(details_recolte__ligne__fiche__statut="valide")),
+                    0),
+                last_recolte=Max(
+                    "details_recolte__ligne__fiche__date",
+                    filter=Q(details_recolte__ligne__fiche__statut="valide")),
             )
             .order_by("-id")
         )
@@ -162,7 +167,7 @@ class SecteurViewSet(viewsets.ModelViewSet):
 
         def monthly_totals(target_year):
             qs = (
-                FicheRecolteDetail.objects.filter(secteur=secteur, ligne__fiche__date__year=target_year, **detail_extra)
+                FicheRecolteDetail.objects.filter(secteur=secteur, ligne__fiche__date__year=target_year, ligne__fiche__statut="valide", **detail_extra)
                 .values("ligne__fiche__date__month")
                 .annotate(total=Sum("quantite"))
             )
@@ -171,7 +176,7 @@ class SecteurViewSet(viewsets.ModelViewSet):
 
         start_year = year - 4
         yearly_qs = (
-            FicheRecolteDetail.objects.filter(secteur=secteur, ligne__fiche__date__year__gte=start_year, **detail_extra)
+            FicheRecolteDetail.objects.filter(secteur=secteur, ligne__fiche__date__year__gte=start_year, ligne__fiche__statut="valide", **detail_extra)
             .values("ligne__fiche__date__year")
             .annotate(total=Sum("quantite"))
             .order_by("ligne__fiche__date__year")
@@ -180,7 +185,7 @@ class SecteurViewSet(viewsets.ModelViewSet):
         yearly_labels = list(range(start_year, year + 1))
 
         yearly_regime_qs = (
-            FicheRecolteDetail.objects.filter(secteur=secteur, ligne__fiche__date__year__gte=start_year, **detail_extra)
+            FicheRecolteDetail.objects.filter(secteur=secteur, ligne__fiche__date__year__gte=start_year, ligne__fiche__statut="valide", **detail_extra)
             .values("ligne__fiche__date__year", "ligne__regime_type")
             .annotate(total=Sum("quantite"))
         )
@@ -197,14 +202,14 @@ class SecteurViewSet(viewsets.ModelViewSet):
                 petits_by_year[yr] = petits_by_year.get(yr, 0) + t
 
         total_year = (
-            FicheRecolteDetail.objects.filter(secteur=secteur, ligne__fiche__date__year=year, **detail_extra)
+            FicheRecolteDetail.objects.filter(secteur=secteur, ligne__fiche__date__year=year, ligne__fiche__statut="valide", **detail_extra)
             .aggregate(total=Sum("quantite"))["total"] or 0
         )
         superficie = float(secteur.superficie_ha or 0)
         rendement_ha = round(float(total_year) / superficie, 4) if superficie else 0
 
         regime_qs = (
-            FicheRecolteDetail.objects.filter(secteur=secteur, ligne__fiche__date__year=year, **detail_extra)
+            FicheRecolteDetail.objects.filter(secteur=secteur, ligne__fiche__date__year=year, ligne__fiche__statut="valide", **detail_extra)
             .values("ligne__regime_type")
             .annotate(total=Sum("quantite"))
         )
@@ -214,6 +219,7 @@ class SecteurViewSet(viewsets.ModelViewSet):
             Personnel.objects.filter(
                 lignes_recolte__details__secteur=secteur,
                 lignes_recolte__fiche__date__year=year,
+                lignes_recolte__fiche__statut="valide",
                 **pers_extra,
             )
             .distinct()
@@ -224,20 +230,25 @@ class SecteurViewSet(viewsets.ModelViewSet):
             Personnel.objects.filter(
                 lignes_recolte__details__secteur=secteur,
                 lignes_recolte__fiche__date__year=year,
+                lignes_recolte__fiche__statut="valide",
                 **pers_extra,
             )
             .annotate(
-                total=Coalesce(Sum("lignes_recolte__details__quantite"), 0),
-                grands=Coalesce(Sum("lignes_recolte__details__quantite", filter=Q(lignes_recolte__regime_type="grands")), 0),
-                moyens=Coalesce(Sum("lignes_recolte__details__quantite", filter=Q(lignes_recolte__regime_type="moyens")), 0),
-                petits=Coalesce(Sum("lignes_recolte__details__quantite", filter=Q(lignes_recolte__regime_type="petits")), 0),
+                total=Coalesce(Sum("lignes_recolte__details__quantite",
+                                   filter=Q(lignes_recolte__fiche__statut="valide")), 0),
+                grands=Coalesce(Sum("lignes_recolte__details__quantite",
+                                    filter=Q(lignes_recolte__regime_type="grands", lignes_recolte__fiche__statut="valide")), 0),
+                moyens=Coalesce(Sum("lignes_recolte__details__quantite",
+                                    filter=Q(lignes_recolte__regime_type="moyens", lignes_recolte__fiche__statut="valide")), 0),
+                petits=Coalesce(Sum("lignes_recolte__details__quantite",
+                                    filter=Q(lignes_recolte__regime_type="petits", lignes_recolte__fiche__statut="valide")), 0),
             )
             .values("id", "numero_telephone", "nom", "total", "grands", "moyens", "petits")
             .order_by("-total")[:10]
         )
 
         all_fiches = list(
-            FicheRecolte.objects.filter(lignes__details__secteur=secteur, date__year=year, **fiche_extra)
+            FicheRecolte.objects.filter(lignes__details__secteur=secteur, date__year=year, statut="valide", **fiche_extra)
             .order_by("date").distinct()
         )
         fiches_annee_rows = []

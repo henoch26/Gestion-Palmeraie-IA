@@ -227,10 +227,8 @@ export default function Sidebar({ isNavigating = false }) {
 
           {/* ── Travaux ── */}
           <SidebarSection skey="travaux" label="Travaux" icon={IcoTool} {...sp}>
-            <TabLink pathname="/travaux" tabKey="entete"       label="Saisie"       defaultTab="entete" />
-            <TabLink pathname="/travaux" tabKey="consommables" label="Consommables" defaultTab="entete" />
-            <TabLink pathname="/travaux" tabKey="taches"       label="Taches"       defaultTab="entete" />
-            <TabLink pathname="/travaux" tabKey="historique"   label="Historique"   defaultTab="entete" />
+            {!isAdmin && <TabLink pathname="/travaux" tabKey="saisie"     label="Saisie"     defaultTab="saisie" />}
+            <TabLink pathname="/travaux" tabKey="historique" label="Historique" defaultTab={isAdmin ? "historique" : "saisie"} />
           </SidebarSection>
 
           {/* ── Agents terrain ── */}
@@ -241,9 +239,9 @@ export default function Sidebar({ isNavigating = false }) {
           )}
 
           {/* ── Ressources — admin ou superviseur avec permission ── */}
-          {(isAdmin || hasPermission("gerer_secteurs") || hasPermission("gerer_recolteurs") || hasPermission("gerer_materiels")) && (
+          {(isAdmin || hasPermission("consulter_secteur") || hasPermission("gerer_recolteurs") || hasPermission("gerer_materiels")) && (
             <SidebarSection skey="ressources" label="Ressources" icon={IcoMap} {...sp}>
-              {(isAdmin || hasPermission("gerer_secteurs")) && (
+              {(isAdmin || hasPermission("consulter_secteur")) && (
                 <SidebarLink to="/secteurs" label="Secteurs" icon={IcoMap} sub />
               )}
               {(isAdmin || hasPermission("gerer_recolteurs")) && (
@@ -260,6 +258,13 @@ export default function Sidebar({ isNavigating = false }) {
             <SidebarLink to="/profil" label="Mon profil" icon={IcoPerson} sub />
             {!isAdmin && <SidebarLink to="/mon-audit" label="Mes actions" icon={IcoList} sub />}
           </SidebarSection>
+
+          {/* ── Clients (admin ou droit gerer_clients) ── */}
+          {!isAdmin && hasPermission("gerer_clients") && (
+            <SidebarSection skey="clients" label="Clients" icon={IcoUsers} {...sp}>
+              <SidebarLink to="/clients" label="Gestion clients" icon={IcoUsers} sub />
+            </SidebarSection>
+          )}
 
           {/* ── Administration (admin) ── */}
           {isAdmin && (

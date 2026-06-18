@@ -51,15 +51,15 @@ def summary_view(request):
     # Superviseur : uniquement ses propres fiches ; admin : tout
     user_is_admin = _is_admin(request.user)
 
-    details_qs = FicheRecolteDetail.objects.all()
+    details_qs = FicheRecolteDetail.objects.filter(ligne__fiche__statut="valide")
     if not user_is_admin:
         details_qs = details_qs.filter(ligne__fiche__created_by=request.user)
 
-    fiches_recolte_qs = FicheRecolte.objects.all()
+    fiches_recolte_qs = FicheRecolte.objects.filter(statut="valide")
     if not user_is_admin:
         fiches_recolte_qs = fiches_recolte_qs.filter(created_by=request.user)
 
-    travaux_qs = FicheTravaux.objects.all()
+    travaux_qs = FicheTravaux.objects.filter(statut="valide")
     if not user_is_admin:
         travaux_qs = travaux_qs.filter(created_by=request.user)
 
@@ -125,11 +125,11 @@ def summary_view(request):
 
     # Ventes
     montant_total_ventes = (
-        FicheRecuVente.objects.filter(fiche__in=fiches_recolte_qs, date__isnull=False, date__year=selected_year)
+        FicheRecuVente.objects.filter(fiche__in=fiches_recolte_qs, statut="valide", date__isnull=False, date__year=selected_year)
         .aggregate(total=Sum("montant"))["total"] or 0
     )
     total_kg = float(
-        FicheRecuVente.objects.filter(fiche__in=fiches_recolte_qs, date__isnull=False, date__year=selected_year)
+        FicheRecuVente.objects.filter(fiche__in=fiches_recolte_qs, statut="valide", date__isnull=False, date__year=selected_year)
         .aggregate(total=Sum("pesee_kg"))["total"] or 0
     )
     poids_moyen_regime = round(total_kg / float(total_production), 3) if total_production else 0
@@ -151,7 +151,11 @@ def summary_view(request):
         RepartitionTache.objects.filter(fiche__in=travaux_qs, fiche__created_at__year=selected_year)
         .aggregate(total=Sum(cost_expr))["total"] or 0
     )
-    cout_total_travaux = total_consommables + total_taches
+    total_salaires_travaux = float(
+        travaux_qs.filter(created_at__year=selected_year)
+        .aggregate(total=Sum("salaire_total"))["total"] or 0
+    )
+    cout_total_travaux = total_consommables + total_taches + total_salaires_travaux
 
     # Dépenses récolte
     qs_year = fiches_recolte_qs.filter(date__year=selected_year)
@@ -168,11 +172,11 @@ def summary_view(request):
 
     # KPIs financiers supplémentaires
     nb_ventes = FicheRecuVente.objects.filter(
-        fiche__in=fiches_recolte_qs, date__isnull=False, date__year=selected_year
+        fiche__in=fiches_recolte_qs, statut="valide", date__isnull=False, date__year=selected_year
     ).count()
     ca_mois = float(
         FicheRecuVente.objects.filter(
-            fiche__in=fiches_recolte_qs, date__isnull=False,
+            fiche__in=fiches_recolte_qs, statut="valide", date__isnull=False,
             date__year=selected_year, date__month=today.month,
         ).aggregate(t=Sum("montant"))["t"] or 0
     )
@@ -218,7 +222,7 @@ def summary_view(request):
 
     def ventes_by_month(target_year):
         qs = (
-            FicheRecuVente.objects.filter(fiche__in=fiches_recolte_qs, date__isnull=False, date__year=target_year)
+            FicheRecuVente.objects.filter(fiche__in=fiches_recolte_qs, statut="valide", date__isnull=False, date__year=target_year)
             .values("date__month").annotate(total=Sum("montant"))
         )
         by_month = {r["date__month"]: float(r["total"] or 0) for r in qs}
@@ -235,7 +239,7 @@ def summary_view(request):
     ventes_last6 = []
     for yy, mm, _ in last6:
         val = FicheRecuVente.objects.filter(
-            fiche__in=fiches_recolte_qs, date__isnull=False, date__year=yy, date__month=mm
+            fiche__in=fiches_recolte_qs, statut="valide", date__isnull=False, date__year=yy, date__month=mm
         ).aggregate(t=Sum("montant"))["t"] or 0
         ventes_last6.append(float(val))
 
@@ -364,7 +368,7 @@ def summary_view(request):
         for r in sal_qs:
             m = r["fiche__date__month"]
             base[m] = base.get(m, 0.0) + float(r["total"] or 0)
-        # Travaux : consommables + tâches
+        # Travaux : consommables + tâches + salaires travailleurs
         for r in (ConsommableTravaux.objects
                   .filter(fiche__in=trav_qs, fiche__created_at__year=year)
                   .values("fiche__created_at__month").annotate(total=Sum(cost_expr))):
@@ -374,6 +378,10 @@ def summary_view(request):
                   .filter(fiche__in=trav_qs, fiche__created_at__year=year)
                   .values("fiche__created_at__month").annotate(total=Sum(cost_expr))):
             m = r["fiche__created_at__month"]
+            base[m] = base.get(m, 0.0) + float(r["total"] or 0)
+        for r in (trav_qs.filter(created_at__year=year)
+                  .values("created_at__month").annotate(total=Sum("salaire_total"))):
+            m = r["created_at__month"]
             base[m] = base.get(m, 0.0) + float(r["total"] or 0)
         return [base.get(m, 0.0) for m in range(1, 13)]
 
@@ -391,7 +399,8 @@ def summary_view(request):
         sal  = float(_LigneDep.objects.filter(fiche__in=fiches_m).aggregate(t=Sum("salaire_calcule"))["t"] or 0)
         cons = float(ConsommableTravaux.objects.filter(fiche__in=trav_m).aggregate(t=Sum(cost_expr))["t"] or 0)
         tach = float(RepartitionTache.objects.filter(fiche__in=trav_m).aggregate(t=Sum(cost_expr))["t"] or 0)
-        dep_last6.append(float((row.get("nourriture") or 0) + (row.get("transport") or 0)) + sal + cons + tach)
+        sal_trav = float(trav_m.aggregate(t=Sum("salaire_total"))["t"] or 0)
+        dep_last6.append(float((row.get("nourriture") or 0) + (row.get("transport") or 0)) + sal + cons + tach + sal_trav)
 
     # Dépenses par secteur et par type de régime
     def depenses_par_secteur(target_year):
@@ -399,7 +408,8 @@ def summary_view(request):
         for code in prod_labels:
             fiches_ids = (
                 FicheRecolteDetail.objects.filter(
-                    secteur__code=code, ligne__fiche__date__year=target_year
+                    secteur__code=code, ligne__fiche__date__year=target_year,
+                    ligne__fiche__statut="valide",
                 ).values_list("ligne__fiche_id", flat=True).distinct()
             )
             dep = float(
@@ -461,7 +471,7 @@ def summary_view(request):
         .order_by("-total_regimes")
     )
     salaire_qs = (
-        _Ligne.objects.filter(fiche__date__year=selected_year, recolteur__isnull=False)
+        _Ligne.objects.filter(fiche__date__year=selected_year, fiche__statut="valide", recolteur__isnull=False)
         .values("recolteur")
         .annotate(total_salaire=Sum("salaire_calcule"))
     )
@@ -535,6 +545,10 @@ def summary_view(request):
                 .values("fiche__created_at__month").annotate(total=Sum(cost_expr)):
             mm = r["fiche__created_at__month"]
             cost_map[mm] = cost_map.get(mm, 0) + float(r["total"] or 0)
+        for r in travaux_qs.filter(created_at__year=target_year)\
+                .values("created_at__month").annotate(total=Sum("salaire_total")):
+            mm = r["created_at__month"]
+            cost_map[mm] = cost_map.get(mm, 0) + float(r["total"] or 0)
         return [round(cost_map.get(mm, 0.0), 2) for mm in range(1, 13)]
 
     cout_travaux_annuel = cout_travaux_by_month(selected_year)
@@ -548,7 +562,9 @@ def summary_view(request):
         tt = float(RepartitionTache.objects.filter(fiche__in=travaux_qs,
                     fiche__created_at__year=yy, fiche__created_at__month=mm)
                     .aggregate(t=Sum(cost_expr))["t"] or 0)
-        cout_travaux_last6.append(round(tc + tt, 2))
+        ts = float(travaux_qs.filter(created_at__year=yy, created_at__month=mm)
+                    .aggregate(t=Sum("salaire_total"))["t"] or 0)
+        cout_travaux_last6.append(round(tc + tt + ts, 2))
 
     # Production journalière
     prod_by_date_qs = (
@@ -581,7 +597,7 @@ def summary_view(request):
     secteurs_list = list(Secteur.objects.all().order_by("-id")[:5].values("code", "nom", "superficie_ha", "statut"))
     recoltes_list = list(fiches_recolte_qs.all().order_by("-date")[:5].values("id", "date", "statut"))
     travaux_list = list(travaux_qs.all().order_by("-id")[:5].values("id", "periode_travaux", "nature_travaux", "statut_avancement"))
-    recus_list = list(FicheRecuVente.objects.filter(fiche__in=fiches_recolte_qs).order_by("-id")[:5].values("date", "client", "montant"))
+    recus_list = list(FicheRecuVente.objects.filter(fiche__in=fiches_recolte_qs, statut="valide").order_by("-id")[:5].values("date", "client", "montant"))
     materiels_list = list(MaterielEquipement.objects.all().order_by("-id")[:5].values("numero", "designation", "quantite", "statut_utilisation"))
 
     return Response({

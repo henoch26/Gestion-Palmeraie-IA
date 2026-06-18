@@ -96,9 +96,15 @@ class PersonnelViewSet(viewsets.ModelViewSet):
     def destroy(self, request, *args, **kwargs):
         instance = self.get_object()
         snap = audit_snapshot(instance, _PERSONNEL_LABELS)
+        before_raw = build_revert_meta(instance, _PERSONNEL_LABELS)
+        before_raw["id"] = instance.pk
+        # IDs exacts des lignes liées — utilisés sur le revert pour éviter toute ambiguïté par nom
+        before_raw["ligne_ids"] = list(
+            instance.lignes_recolte.values_list("id", flat=True)
+        )
         log_action(request.user, "suppression_recolteur",
                    detail=f"Récolteur « {instance.nom} » supprimé.",
-                   meta={"snapshot": snap})
+                   meta={"snapshot": snap, "object_type": "recolteur", "before_raw": before_raw})
         return super().destroy(request, *args, **kwargs)
 
     @action(detail=False, methods=["get"], url_path="stats")
@@ -110,20 +116,20 @@ class PersonnelViewSet(viewsets.ModelViewSet):
             Personnel.objects.annotate(
                 grands=Coalesce(
                     Sum("lignes_recolte__details__quantite",
-                        filter=Q(lignes_recolte__fiche__date__year=year, lignes_recolte__regime_type="grands")), 0),
+                        filter=Q(lignes_recolte__fiche__date__year=year, lignes_recolte__fiche__statut="valide", lignes_recolte__regime_type="grands")), 0),
                 moyens=Coalesce(
                     Sum("lignes_recolte__details__quantite",
-                        filter=Q(lignes_recolte__fiche__date__year=year, lignes_recolte__regime_type="moyens")), 0),
+                        filter=Q(lignes_recolte__fiche__date__year=year, lignes_recolte__fiche__statut="valide", lignes_recolte__regime_type="moyens")), 0),
                 petits=Coalesce(
                     Sum("lignes_recolte__details__quantite",
-                        filter=Q(lignes_recolte__fiche__date__year=year, lignes_recolte__regime_type="petits")), 0),
+                        filter=Q(lignes_recolte__fiche__date__year=year, lignes_recolte__fiche__statut="valide", lignes_recolte__regime_type="petits")), 0),
                 total_regimes=Coalesce(
                     Sum("lignes_recolte__details__quantite",
-                        filter=Q(lignes_recolte__fiche__date__year=year)), 0),
+                        filter=Q(lignes_recolte__fiche__date__year=year, lignes_recolte__fiche__statut="valide")), 0),
                 fiches_count=Count("lignes_recolte__fiche", distinct=True,
-                                   filter=Q(lignes_recolte__fiche__date__year=year)),
+                                   filter=Q(lignes_recolte__fiche__date__year=year, lignes_recolte__fiche__statut="valide")),
                 last_recolte=Max("lignes_recolte__fiche__date",
-                                 filter=Q(lignes_recolte__fiche__date__year=year)),
+                                 filter=Q(lignes_recolte__fiche__date__year=year, lignes_recolte__fiche__statut="valide")),
             )
             .values("id", "numero_telephone", "nom", "lieu_residence",
                     "grands", "moyens", "petits", "total_regimes", "fiches_count", "last_recolte")
@@ -156,7 +162,8 @@ class PersonnelViewSet(viewsets.ModelViewSet):
         def monthly_totals(target_year):
             qs = (
                 FicheRecolteDetail.objects.filter(
-                    ligne__recolteur=personne, ligne__fiche__date__year=target_year, **detail_extra
+                    ligne__recolteur=personne, ligne__fiche__date__year=target_year,
+                    ligne__fiche__statut="valide", **detail_extra
                 )
                 .values("ligne__fiche__date__month")
                 .annotate(total=Sum("quantite"))
@@ -167,7 +174,8 @@ class PersonnelViewSet(viewsets.ModelViewSet):
         start_year = year - 4
         yearly_qs = (
             FicheRecolteDetail.objects.filter(
-                ligne__recolteur=personne, ligne__fiche__date__year__gte=start_year, **detail_extra
+                ligne__recolteur=personne, ligne__fiche__date__year__gte=start_year,
+                ligne__fiche__statut="valide", **detail_extra
             )
             .values("ligne__fiche__date__year")
             .annotate(total=Sum("quantite"))
@@ -178,7 +186,8 @@ class PersonnelViewSet(viewsets.ModelViewSet):
 
         yearly_regime_qs = (
             FicheRecolteDetail.objects.filter(
-                ligne__recolteur=personne, ligne__fiche__date__year__gte=start_year, **detail_extra
+                ligne__recolteur=personne, ligne__fiche__date__year__gte=start_year,
+                ligne__fiche__statut="valide", **detail_extra
             )
             .values("ligne__fiche__date__year", "ligne__regime_type")
             .annotate(total=Sum("quantite"))
@@ -196,30 +205,31 @@ class PersonnelViewSet(viewsets.ModelViewSet):
                 petits_by_year[yr] = petits_by_year.get(yr, 0) + t
 
         cb_q = Q(lignes_recolte__fiche__created_by=cb_user) if cb_user else Q()
+        valide_q = Q(lignes_recolte__fiche__statut="valide")
         base = (
             Personnel.objects.filter(id=personne.id)
             .annotate(
                 grands=Coalesce(Sum("lignes_recolte__details__quantite",
-                                    filter=Q(lignes_recolte__fiche__date__year=year, lignes_recolte__regime_type="grands") & cb_q), 0),
+                                    filter=Q(lignes_recolte__fiche__date__year=year, lignes_recolte__regime_type="grands") & cb_q & valide_q), 0),
                 moyens=Coalesce(Sum("lignes_recolte__details__quantite",
-                                    filter=Q(lignes_recolte__fiche__date__year=year, lignes_recolte__regime_type="moyens") & cb_q), 0),
+                                    filter=Q(lignes_recolte__fiche__date__year=year, lignes_recolte__regime_type="moyens") & cb_q & valide_q), 0),
                 petits=Coalesce(Sum("lignes_recolte__details__quantite",
-                                    filter=Q(lignes_recolte__fiche__date__year=year, lignes_recolte__regime_type="petits") & cb_q), 0),
+                                    filter=Q(lignes_recolte__fiche__date__year=year, lignes_recolte__regime_type="petits") & cb_q & valide_q), 0),
                 total_regimes=Coalesce(Sum("lignes_recolte__details__quantite",
-                                           filter=Q(lignes_recolte__fiche__date__year=year) & cb_q), 0),
+                                           filter=Q(lignes_recolte__fiche__date__year=year) & cb_q & valide_q), 0),
             )
             .values("grands", "moyens", "petits", "total_regimes")
             .first() or {}
         )
 
         salaire_total = float(
-            FicheRecolteLigne.objects.filter(recolteur=personne, fiche__date__year=year, **ligne_extra)
+            FicheRecolteLigne.objects.filter(recolteur=personne, fiche__date__year=year, fiche__statut="valide", **ligne_extra)
             .aggregate(t=Coalesce(Sum("salaire_calcule"), Decimal("0")))["t"] or 0
         )
 
         # Rang : si filtre superviseur actif, rang parmi ses propres recolteurs ; sinon global
         all_totals = (
-            FicheRecolteDetail.objects.filter(ligne__fiche__date__year=year, **detail_extra)
+            FicheRecolteDetail.objects.filter(ligne__fiche__date__year=year, ligne__fiche__statut="valide", **detail_extra)
             .exclude(ligne__recolteur__isnull=True)
             .values("ligne__recolteur")
             .annotate(total=Sum("quantite"))
@@ -230,7 +240,8 @@ class PersonnelViewSet(viewsets.ModelViewSet):
 
         secteurs_qs = (
             FicheRecolteDetail.objects.filter(
-                ligne__recolteur=personne, ligne__fiche__date__year=year, **detail_extra
+                ligne__recolteur=personne, ligne__fiche__date__year=year,
+                ligne__fiche__statut="valide", **detail_extra
             )
             .exclude(secteur__isnull=True)
             .values("secteur__id", "secteur__code", "secteur__nom")
@@ -254,7 +265,7 @@ class PersonnelViewSet(viewsets.ModelViewSet):
         ]
 
         fiches = (
-            FicheRecolte.objects.filter(lignes__recolteur=personne, date__year=year, **fiche_extra)
+            FicheRecolte.objects.filter(lignes__recolteur=personne, date__year=year, statut="valide", **fiche_extra)
             .prefetch_related(
                 Prefetch("lignes",
                          queryset=FicheRecolteLigne.objects.filter(recolteur=personne).prefetch_related("details"))

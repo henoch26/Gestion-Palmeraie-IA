@@ -249,6 +249,12 @@ class FicheRecolteViewSet(viewsets.ModelViewSet):
 
     def destroy(self, request, *args, **kwargs):
         instance = self.get_object()
+        if instance.statut == "valide":
+            from rest_framework.exceptions import PermissionDenied
+            raise PermissionDenied("Une fiche validée ne peut pas être supprimée.")
+        if not _is_admin(request.user) and instance.created_by != request.user:
+            from rest_framework.exceptions import PermissionDenied
+            raise PermissionDenied("Vous ne pouvez supprimer que vos propres fiches.")
         date_str = str(instance.date) if instance.date else f"#{instance.pk}"
         snap = {
             "Date": date_str,
@@ -713,11 +719,10 @@ class FicheRecuVenteViewSet(viewsets.ModelViewSet):
         if instance.statut == "valide" and not _is_admin(request.user):
             from rest_framework.exceptions import PermissionDenied
             raise PermissionDenied("Ce reçu est validé et ne peut être supprimé que par l'administrateur.")
-        if _is_admin(request.user):
-            snap = {label: str(getattr(instance, field, "") or "") for field, label in _RECU_FIELDS.items()}
-            _log_action(request.user, "suppression_recu", fiche=instance.fiche, recu=instance,
-                        detail=f"Reçu #{instance.id} du {instance.date} supprimé (fiche du {instance.fiche.date if instance.fiche else '?'}).",
-                        meta={"snapshot": snap})
+        snap = {label: str(getattr(instance, field, "") or "") for field, label in _RECU_FIELDS.items()}
+        _log_action(request.user, "suppression_recu", fiche=instance.fiche, recu=instance,
+                    detail=f"Reçu #{instance.id} du {instance.date} supprimé (fiche du {instance.fiche.date if instance.fiche else '?'}).",
+                    meta={"snapshot": snap})
         return super().destroy(request, *args, **kwargs)
 
     @action(detail=True, methods=["post"], url_path="valider")
@@ -858,7 +863,7 @@ class ActionLogViewSet(viewsets.ReadOnlyModelViewSet):
             "modification_materiel": ("materiels", "MaterielEquipement"),
             "modification_recolteur":("recolteurs","Personnel"),
         }
-        if log.action not in REVERSIBLE_REF and log.action != "soumission_fiche":
+        if log.action not in REVERSIBLE_REF and log.action not in ("soumission_fiche", "suppression_recolteur"):
             return Response({"detail": "Ce type d'action ne peut pas être annulé."}, status=400)
 
         raison = (request.data.get("raison") or "").strip()
@@ -870,8 +875,59 @@ class ActionLogViewSet(viewsets.ReadOnlyModelViewSet):
 
         revert_label = parsed.get("label", log.get_action_display())
 
+        # ── Revert suppression récolteur ─────────────────────────────
+        if log.action == "suppression_recolteur":
+            before_raw = parsed.get("before_raw")
+            if not before_raw or "id" not in before_raw:
+                return Response(
+                    {"detail": "Données de restauration manquantes — cette entrée a été créée avant l'activation de l'annulation."},
+                    status=400,
+                )
+            from recolteurs.models import Personnel
+            from recoltes.models import FicheRecolteLigne
+
+            original_id = before_raw["id"]
+            nom = before_raw.get("nom") or ""
+
+            if Personnel.objects.filter(pk=original_id).exists():
+                return Response({"detail": "Un récolteur avec cet identifiant existe déjà en base."}, status=400)
+
+            date_naissance = None
+            if before_raw.get("date_naissance"):
+                try:
+                    date_naissance = datetime.date.fromisoformat(str(before_raw["date_naissance"]))
+                except (ValueError, TypeError):
+                    pass
+
+            try:
+                Personnel.objects.create(
+                    id=original_id,
+                    nom=nom,
+                    lieu_residence=before_raw.get("lieu_residence") or "",
+                    numero_telephone=before_raw.get("numero_telephone") or "",
+                    whatsapp_actif=bool(before_raw.get("whatsapp_actif", False)),
+                    est_wave=bool(before_raw.get("est_wave", False)),
+                    date_naissance=date_naissance,
+                )
+            except Exception as e:
+                return Response({"detail": f"Impossible de restaurer le récolteur : {e}"}, status=400)
+
+            # Relier exactement les lignes qui appartenaient à ce récolteur (par IDs sauvegardés)
+            ligne_ids = before_raw.get("ligne_ids") or []
+            if ligne_ids:
+                FicheRecolteLigne.objects.filter(
+                    id__in=ligne_ids,
+                    recolteur__isnull=True,
+                ).update(recolteur_id=original_id)
+            else:
+                # Fallback pour les entrées créées avant ce correctif
+                FicheRecolteLigne.objects.filter(
+                    recolteur__isnull=True,
+                    recolteur_nom=nom,
+                ).update(recolteur_id=original_id)
+
         # ── Revert soumission fiche ──────────────────────────────────
-        if log.action == "soumission_fiche":
+        elif log.action == "soumission_fiche":
             fiche = log.fiche
             if not fiche:
                 return Response({"detail": "Fiche introuvable."}, status=404)

@@ -116,6 +116,12 @@ class FicheTravauxViewSet(viewsets.ModelViewSet):
 
     def destroy(self, request, *args, **kwargs):
         instance = self.get_object()
+        if instance.statut == "valide":
+            from rest_framework.exceptions import PermissionDenied
+            raise PermissionDenied("Une fiche travaux validée ne peut pas être supprimée.")
+        if not _is_admin(request.user) and instance.created_by != request.user:
+            from rest_framework.exceptions import PermissionDenied
+            raise PermissionDenied("Vous ne pouvez supprimer que vos propres fiches travaux.")
         ref = str(instance.periode_travaux) if instance.periode_travaux else f"#{instance.pk}"
         snap = {
             "Superviseur": instance.superviseur_travaux or "",
@@ -128,7 +134,8 @@ class FicheTravauxViewSet(viewsets.ModelViewSet):
         }
         log_action(request.user, "suppression_travaux",
                    detail=f"Fiche travaux ({ref}) supprimée.",
-                   meta={"snapshot": snap})
+                   meta={"snapshot": snap},
+                   superviseur=request.user if not _is_admin(request.user) else None)
         return super().destroy(request, *args, **kwargs)
 
     def get_permissions(self):

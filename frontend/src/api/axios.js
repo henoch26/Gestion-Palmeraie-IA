@@ -2,6 +2,7 @@ import { getToken } from "../services/authService.js";
 
 // Base URL API (configurable via .env)
 const API_BASE = import.meta.env.VITE_API_URL || "http://127.0.0.1:8000/api";
+const STORAGE_KEY = "palmeraie_auth";
 
 // Helper pour les requetes HTTP
 async function apiRequest(path, options = {}) {
@@ -24,6 +25,13 @@ async function apiRequest(path, options = {}) {
     });
   } catch {
     throw new Error("Serveur indisponible");
+  }
+
+  // 401 avec session active = compte désactivé ou token révoqué → déconnexion forcée
+  if (res.status === 401 && sessionStorage.getItem(STORAGE_KEY)) {
+    sessionStorage.removeItem(STORAGE_KEY);
+    window.location.href = "/login";
+    return;
   }
 
   // 204: pas de contenu

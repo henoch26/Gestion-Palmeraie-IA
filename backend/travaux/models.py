@@ -87,6 +87,7 @@ class FicheTravaux(models.Model):
     date_debut = models.DateField(null=True, blank=True)
     date_fin = models.DateField(null=True, blank=True)
     cout_total_calcule = models.DecimalField(max_digits=14, decimal_places=2, null=True, blank=True)
+    salaire_total = models.DecimalField(max_digits=14, decimal_places=2, null=True, blank=True)
     statut_avancement = models.CharField(
         max_length=20, choices=STATUT_AVANCEMENT_CHOICES, default="planifie"
     )
@@ -117,6 +118,7 @@ class FicheTravaux(models.Model):
             total += (c.quantite or Decimal("0.00")) * (c.prix_unitaire or Decimal("0.00"))
         for r in self.repartitions.all():
             total += (r.quantite or Decimal("0.00")) * (r.prix_unitaire or Decimal("0.00"))
+        total += self.salaire_total or Decimal("0.00")
         FicheTravaux.objects.filter(pk=self.pk).update(cout_total_calcule=total)
         self.cout_total_calcule = total
 

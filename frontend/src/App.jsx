@@ -18,10 +18,13 @@ import MonAudit from "./pages/superviseur/MonAudit.jsx";
 import ListeAgents from "./pages/agents/ListeAgents.jsx";
 import DetailSuperviseur from "./pages/superviseurs/DetailSuperviseur.jsx";
 import LoginPage from "./pages/auth/LoginPage.jsx";
+import ForgotPasswordPage from "./pages/auth/ForgotPasswordPage.jsx";
+import ResetPasswordPage from "./pages/auth/ResetPasswordPage.jsx";
 import ChangePasswordPage from "./pages/auth/ChangePasswordPage.jsx";
 import MonProfilPage from "./pages/auth/MonProfilPage.jsx";
 import ProtectedRoute from "./routes/ProtectedRoute.jsx";
 import AdminRoute from "./routes/AdminRoute.jsx";
+import RequirePermission from "./routes/RequirePermission.jsx";
 import { apiGet } from "./api/axios.js";
 import { useToast } from "./context/ToastContext.jsx";
 
@@ -84,8 +87,10 @@ export default function App(){
     <>
       <BrowserRouter>
         <Routes>
-          {/* Route publique */}
+          {/* Routes publiques */}
           <Route path="/login" element={<LoginPage />} />
+          <Route path="/forgot-password" element={<ForgotPasswordPage />} />
+          <Route path="/reset-password" element={<ResetPasswordPage />} />
 
           {/* Routes protegees (tous les utilisateurs connectes) */}
           <Route element={<ProtectedRoute />}>
@@ -112,10 +117,12 @@ export default function App(){
               {/* Page audit superviseur (accessible à tous les connectés) */}
               <Route path="/mon-audit" element={<MonAudit />}/>
 
+              {/* Clients — admin ou superviseur avec droit gerer_clients */}
+              <Route path="/clients" element={<RequirePermission code="gerer_clients"><GestionClients /></RequirePermission>} />
+
               {/* Routes admin uniquement */}
               <Route element={<AdminRoute />}>
                 <Route path="/utilisateurs" element={<GestionUtilisateurs />}/>
-                <Route path="/clients" element={<GestionClients />}/>
                 <Route path="/parametre-bonus" element={<ParametreBonus />}/>
                 <Route path="/journal-audit" element={<JournalAudit />}/>
               </Route>

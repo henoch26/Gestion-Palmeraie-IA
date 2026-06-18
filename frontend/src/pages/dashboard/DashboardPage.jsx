@@ -417,7 +417,7 @@ export default function DashboardPage() {
     };
 
     return {
-      title: "Production par secteur",
+      title: `Production par secteur (${year})`,
       type: "doughnut",
       data: {
         labels: actifs.map((r) => r.code),
@@ -426,23 +426,63 @@ export default function DashboardPage() {
       options: pieOpts,
       plugins: [sectorLabelsPlugin],
     };
-  }, [tables.secteurs_detail]);
+  }, [tables.secteurs_detail, year]);
 
-  // ── Graphique ventes vs dépenses ──────────────────────────────────────────
+  // ── Graphique ventes vs dépenses (courbes) ───────────────────────────────
   const chartVentesDepenses = useMemo(() => {
     const src = charts.depenses_vs_production;
     if (!src) return null;
+    const ventes   = truncateToCurrentMonth(charts.montant_ventes_annuel?.data || [], year);
+    const depenses = truncateToCurrentMonth(src.depenses, year);
     return {
       title: `Ventes vs Dépenses ${year}`,
-      type: "bar",
+      type: "line",
       data: {
         labels: src.labels,
         datasets: [
-          { label: "Ventes (FCFA)", data: truncateToCurrentMonth(charts.montant_ventes_annuel?.data || [], year), backgroundColor: `${COLORS.blue}99` },
-          { label: "Dépenses (FCFA)", data: truncateToCurrentMonth(src.depenses, year), backgroundColor: `${COLORS.red}99` },
+          {
+            label: "Ventes (FCFA)",
+            data: ventes,
+            borderColor: COLORS.blue,
+            backgroundColor: `${COLORS.blue}18`,
+            tension: 0.35,
+            fill: true,
+            pointRadius: 4,
+            pointHoverRadius: 6,
+          },
+          {
+            label: "Dépenses (FCFA)",
+            data: depenses,
+            borderColor: COLORS.red,
+            backgroundColor: `${COLORS.red}18`,
+            tension: 0.35,
+            fill: true,
+            pointRadius: 4,
+            pointHoverRadius: 6,
+          },
         ],
       },
-      options: barOptsFCFA,
+      options: {
+        responsive: true,
+        interaction: { mode: "index", intersect: false },
+        plugins: {
+          legend: { position: "top" },
+          tooltip: {
+            callbacks: {
+              label: (ctx) => ` ${ctx.dataset.label} : ${Number(ctx.parsed.y).toLocaleString("fr-FR")} FCFA`,
+            },
+          },
+        },
+        scales: {
+          x: { grid: { display: false } },
+          y: {
+            beginAtZero: true,
+            ticks: {
+              callback: (v) => Number(v).toLocaleString("fr-FR") + " F",
+            },
+          },
+        },
+      },
     };
   }, [charts]);
 
@@ -562,7 +602,7 @@ export default function DashboardPage() {
                     <div>
                       <p style={lbl}>Poids & Rendement</p>
                       <div style={G3}>
-                        <KpiCard compact title="Poids total récolté" value={`${fmtDec(s.total_kg)} kg`} color={COLORS.lightGreen} loading={loading} />
+                        <KpiCard compact title="Poids total vendu" value={`${fmtDec(s.total_kg)} kg`} color={COLORS.lightGreen} loading={loading} />
                         <KpiCard compact title="Poids moyen / régime" value={s.poids_moyen_regime ? `${fmtDec(s.poids_moyen_regime)} kg` : "—"} color={COLORS.lightGreen} loading={loading} />
                         <KpiCard compact title="Rendement moyen" value={s.rendement_moyen ? `${fmtDec(s.rendement_moyen)} rég/ha` : "—"} color={COLORS.amber} sub={s.rendement_kg_ha ? `${fmtDec(s.rendement_kg_ha)} kg/ha` : undefined} loading={loading} />
                       </div>
@@ -718,7 +758,7 @@ export default function DashboardPage() {
               <section className="stats-grid">
                 <KpiCard title="Nombre de ventes" value={fmtInt(s.nb_ventes)} color={COLORS.blue} loading={loading} />
                 <KpiCard title="Chiffre d'affaires annuel" value={fmtMoney(s.montant_total_ventes)} color={COLORS.blue} loading={loading} />
-                <KpiCard title={`CA du mois (${new Date().toLocaleString("fr-FR", { month: "long" })})`}
+                <KpiCard title={`CA du mois (${new Date().toLocaleString("fr-FR", { month: "long" })} ${year})`}
                   value={fmtMoney(s.ca_mois)} color={COLORS.lightBlue} loading={loading} />
                 <KpiCard title="Prix moyen / kg" value={s.prix_moyen_kg ? `${fmtInt(s.prix_moyen_kg)} FCFA` : "—"}
                   color={COLORS.lightBlue} loading={loading} />
@@ -730,7 +770,8 @@ export default function DashboardPage() {
                 <KpiCard title="Nourriture" value={fmtMoney(s.dep_nourriture)} color={COLORS.orange} loading={loading} />
                 <KpiCard title="Transport" value={fmtMoney(s.dep_transport)} color={COLORS.orange} loading={loading} />
                 <KpiCard title="Salaires récolteurs" value={fmtMoney(s.depenses_salaires_recolteurs)} color={COLORS.orange} loading={loading} />
-                <KpiCard title="Dépenses totales" value={fmtMoney(s.depenses_totales)} color={COLORS.red} loading={loading} />
+                <KpiCard title="Coûts travaux" value={fmtMoney(s.cout_total_travaux)} color={COLORS.orange} sub="Consommables + main d'œuvre" loading={loading} />
+                <KpiCard title="Dépenses totales" value={fmtMoney(s.depenses_totales)} color={COLORS.red} sub="Récolte + Travaux" loading={loading} />
               </section>
 
               {/* Rentabilité */}

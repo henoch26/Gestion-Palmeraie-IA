@@ -1,4 +1,4 @@
-import { apiDelete, apiGet, apiPost, apiPostMultipart, apiPut, apiPutMultipart } from "../api/axios.js";
+import { apiDelete, apiGet, apiPatch, apiPost, apiPostMultipart, apiPut, apiPutMultipart } from "../api/axios.js";
 import { endpoints } from "../api/endpoints.js";
 
 const BASE = endpoints.personnel;
@@ -9,8 +9,8 @@ export const listPersonnel = () => apiGet(BASE);
 export const createRecolteur = (payload) => apiPost(BASE, payload);
 export const createPersonnel = (payload) => apiPost(BASE, payload);
 export const createPersonnelMultipart = (formData) => apiPostMultipart(BASE, formData);
-export const updateRecolteur = (id, payload) => apiPut(`${BASE}${id}/`, payload);
-export const updatePersonnel = (id, payload) => apiPut(`${BASE}${id}/`, payload);
+export const updateRecolteur = (id, payload) => apiPatch(`${BASE}${id}/`, payload);
+export const updatePersonnel = (id, payload) => apiPatch(`${BASE}${id}/`, payload);
 export const updatePersonnelMultipart = (id, formData) => apiPutMultipart(`${BASE}${id}/`, formData);
 export const deleteRecolteur = (id) => apiDelete(`${BASE}${id}/`);
 export const deletePersonnel = (id) => apiDelete(`${BASE}${id}/`);

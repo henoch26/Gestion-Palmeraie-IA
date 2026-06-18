@@ -129,20 +129,46 @@ class SuperviseurGeneralViewSet(viewsets.ModelViewSet):
 
     @action(detail=True, methods=["get"], url_path="stats")
     def stats(self, request, pk=None):
+        from decimal import Decimal
         from recoltes.models import FicheRecolte, FicheRecolteDetail, FicheRecuVente
+        from travaux.models import FicheTravaux, ConsommableTravaux, RepartitionTache
+        from django.db.models import F
+        from django.db.models.expressions import ExpressionWrapper
+        from django.db.models import DecimalField
 
         sup = self.get_object()
-        # Les fiches sont liées au compte utilisateur (created_by), pas au FK superviseur_general_obj
         user = sup.user
         fiches_qs = FicheRecolte.objects.filter(created_by=user)
         details_qs = FicheRecolteDetail.objects.filter(ligne__fiche__created_by=user)
+        travaux_qs = FicheTravaux.objects.filter(created_by=user)
+
+        cost_expr = ExpressionWrapper(
+            F("quantite") * F("prix_unitaire"),
+            output_field=DecimalField(max_digits=20, decimal_places=2),
+        )
 
         # ── KPIs globaux ─────────────────────────────────────────────
-        agg = fiches_qs.aggregate(nb_fiches=Count("id"), total_depenses=Sum("depense_total"))
+        agg = fiches_qs.aggregate(nb_fiches=Count("id"), total_depenses_recolte=Sum("depense_total"))
         total_recettes = float(
             FicheRecuVente.objects.filter(fiche__created_by=user)
             .aggregate(t=Sum("montant"))["t"] or 0
         )
+
+        # Coûts travaux
+        total_cons = float(
+            ConsommableTravaux.objects.filter(fiche__in=travaux_qs)
+            .aggregate(t=Sum(cost_expr))["t"] or 0
+        )
+        total_tach = float(
+            RepartitionTache.objects.filter(fiche__in=travaux_qs)
+            .aggregate(t=Sum(cost_expr))["t"] or 0
+        )
+        total_sal_trav = float(
+            travaux_qs.aggregate(t=Sum("salaire_total"))["t"] or 0
+        )
+        total_depenses_travaux = total_cons + total_tach + total_sal_trav
+        total_depenses = float(agg["total_depenses_recolte"] or 0) + total_depenses_travaux
+
         total_grands = int(details_qs.filter(ligne__regime_type="grands").aggregate(t=Sum("quantite"))["t"] or 0)
         total_moyens = int(details_qs.filter(ligne__regime_type="moyens").aggregate(t=Sum("quantite"))["t"] or 0)
         total_petits = int(details_qs.filter(ligne__regime_type="petits").aggregate(t=Sum("quantite"))["t"] or 0)
@@ -178,7 +204,7 @@ class SuperviseurGeneralViewSet(viewsets.ModelViewSet):
             elif rt == "moyens": mm_d[key] = t
             elif rt == "petits": pm[key]   = t
 
-        # ── Fiches récentes ───────────────────────────────────────────
+        # ── Fiches récolte récentes ───────────────────────────────────
         recent_fiches = []
         for f in fiches_qs.order_by("-date")[:10]:
             nb_rec = f.lignes.values("recolteur_id").distinct().count()
@@ -192,6 +218,27 @@ class SuperviseurGeneralViewSet(viewsets.ModelViewSet):
                 "nb_recolteurs": nb_rec,
                 "total_regimes": tot,
                 "depense_total": float(f.depense_total or 0),
+            })
+
+        # ── Fiches travaux récentes ───────────────────────────────────
+        recent_travaux = []
+        for t in travaux_qs.order_by("-created_at")[:10]:
+            c_total = float(
+                ConsommableTravaux.objects.filter(fiche=t).aggregate(s=Sum(cost_expr))["s"] or 0
+            )
+            r_total = float(
+                RepartitionTache.objects.filter(fiche=t).aggregate(s=Sum(cost_expr))["s"] or 0
+            )
+            cout = c_total + r_total + float(t.salaire_total or 0)
+            recent_travaux.append({
+                "id": t.id,
+                "periode": t.periode_travaux or "",
+                "nature": t.nature_travaux or "",
+                "statut": t.statut,
+                "statut_avancement": t.statut_avancement or "",
+                "nb_personnes": t.nb_personnes,
+                "salaire_total": float(t.salaire_total or 0),
+                "cout_total": cout,
             })
 
         # ── Permissions ───────────────────────────────────────────────
@@ -213,7 +260,7 @@ class SuperviseurGeneralViewSet(viewsets.ModelViewSet):
             },
             "kpis": {
                 "nb_fiches":      agg["nb_fiches"] or 0,
-                "total_depenses": float(agg["total_depenses"] or 0),
+                "total_depenses": total_depenses,
                 "total_recettes": total_recettes,
                 "total_regimes":  total_grands + total_moyens + total_petits,
             },
@@ -225,6 +272,7 @@ class SuperviseurGeneralViewSet(viewsets.ModelViewSet):
                 "petits": [pm.get(l, 0)   for l in labels],
             },
             "recent_fiches": recent_fiches,
+            "recent_travaux": recent_travaux,
             "permissions": permissions,
         })
 

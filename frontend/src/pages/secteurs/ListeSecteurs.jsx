@@ -6,6 +6,7 @@ import ConfirmDialog from "../../components/ConfirmDialog.jsx";
 import SecteurDialog from "../../components/SecteurDialog.jsx";
 import SuccessDialog from "../../components/SuccessDialog.jsx";
 import { useToast } from "../../context/ToastContext.jsx";
+import { useAuth } from "../../context/AuthContext.jsx";
 import { createSecteur, deleteSecteur, listSecteurs, updateSecteur } from "../../services/secteurService.js";
 import { getToken } from "../../services/authService.js";
 
@@ -14,6 +15,7 @@ const API_BASE = import.meta.env.VITE_API_URL || "http://127.0.0.1:8000/api";
 // CRUD page for secteurs (connecte a l'API)
 export default function ListeSecteurs() {
   const { pushToast } = useToast();
+  const { isAdmin } = useAuth();
   const navigate = useNavigate();
 
   const [rows, setRows] = useState([]);
@@ -39,8 +41,8 @@ export default function ListeSecteurs() {
       render: (row) => (
         <div className="row-actions">
           <button onClick={() => navigate(`/secteurs/${row.id}`)}>Details</button>
-          <button onClick={() => { setEditing(row); setOpenForm(true); }}>Modifier</button>
-          <button onClick={() => setToDelete(row)}>Supprimer</button>
+          {isAdmin && <button onClick={() => { setEditing(row); setOpenForm(true); }}>Modifier</button>}
+          {isAdmin && <button className="btn-danger" onClick={() => setToDelete(row)}>Supprimer</button>}
         </div>
       ),
     },
@@ -123,7 +125,7 @@ export default function ListeSecteurs() {
         <h2>Liste secteurs</h2>
         <div className="row-actions">
           <button className="btn-ghost" onClick={handleExport}>Exporter Excel</button>
-          <button className="btn-primary" onClick={handleAdd}>Ajouter</button>
+          {isAdmin && <button className="btn-primary" onClick={handleAdd}>Ajouter</button>}
         </div>
       </div>
 

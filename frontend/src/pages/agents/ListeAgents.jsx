@@ -1,4 +1,4 @@
-import { useEffect, useState, useMemo } from "react";
+import { useEffect, useState } from "react";
 import { useAuth } from "../../context/AuthContext.jsx";
 import { useToast } from "../../context/ToastContext.jsx";
 import { listAgents, createAgent, updateAgent, deleteAgent } from "../../services/agentService.js";
@@ -14,7 +14,6 @@ export default function ListeAgents() {
   const [agents, setAgents] = useState([]);
   const [secteurs, setSecteurs] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [search, setSearch] = useState("");
 
   const [openForm, setOpenForm] = useState(false);
   const [editing, setEditing] = useState(null);
@@ -36,16 +35,6 @@ export default function ListeAgents() {
   };
 
   useEffect(() => { load(); }, []);
-
-  const filtered = useMemo(() => {
-    const q = search.trim().toLowerCase();
-    if (!q) return agents;
-    return agents.filter((a) =>
-      (a.nom_complet || "").toLowerCase().includes(q) ||
-      (a.matricule   || "").toLowerCase().includes(q) ||
-      (a.telephone   || "").toLowerCase().includes(q)
-    );
-  }, [agents, search]);
 
   const handleAdd = () => { setEditing(null); setOpenForm(true); };
   const handleEdit = (row) => { setEditing(row); setOpenForm(true); };
@@ -108,7 +97,7 @@ export default function ListeAgents() {
       render: (row) => (
         <div className="row-actions">
           <button onClick={() => handleEdit(row)}>Modifier</button>
-          <button onClick={() => setToDelete(row)}>Supprimer</button>
+          <button className="btn-danger" onClick={() => setToDelete(row)}>Supprimer</button>
         </div>
       ),
     }] : []),
@@ -128,17 +117,6 @@ export default function ListeAgents() {
         )}
       </div>
 
-      {/* Barre de recherche */}
-      <div style={{ marginBottom: 16 }}>
-        <input
-          className="fiche-input"
-          style={{ maxWidth: 340 }}
-          placeholder="Rechercher par nom, matricule, telephone..."
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-        />
-      </div>
-
       {loading ? (
         <LogoLoader compact size={70} />
       ) : agents.length === 0 ? (
@@ -151,13 +129,7 @@ export default function ListeAgents() {
           )}
         </div>
       ) : (
-        <>
-          {filtered.length === 0 ? (
-            <p style={{ color: "#aaa" }}>Aucun agent ne correspond a la recherche.</p>
-          ) : (
-            <DataTable columns={columns} rows={filtered} pageSize={10} />
-          )}
-        </>
+        <DataTable columns={columns} rows={agents} pageSize={10} />
       )}
 
       {/* Statistiques rapides */}

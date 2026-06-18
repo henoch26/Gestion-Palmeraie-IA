@@ -84,7 +84,7 @@ export default function ListeRecolteurs() {
             <button onClick={() => { setEditing(row); setOpenForm(true); }}>Modifier</button>
           )}
           {canWrite && (
-            <button onClick={() => setToDelete(row)}>Supprimer</button>
+            <button className="btn-danger" onClick={() => setToDelete(row)}>Supprimer</button>
           )}
         </div>
       ),

@@ -15,6 +15,7 @@ const ACTION_LABELS = {
   modification_recu:        { label: "Modif. reçu",        color: "#00838f", bg: "#e0f7fa" },
   suppression_recu:         { label: "Suppression reçu",   color: "#b71c1c", bg: "#ffebee" },
   validation_recu:          { label: "Validation reçu",    color: "#1b5e20", bg: "#e8f5e9" },
+  rejet_recu:               { label: "Rejet reçu",          color: "#c62828", bg: "#ffebee" },
   // ── Superviseur — fiches & récolteurs ──────────────────────────
   creation_fiche:           { label: "Création fiche",     color: "#0277bd", bg: "#e1f5fe" },
   soumission_fiche:         { label: "Soumission fiche",   color: "#6a1b9a", bg: "#f3e5f5" },
@@ -35,6 +36,8 @@ const ACTION_LABELS = {
   // ── Fiches travaux ─────────────────────────────────────────────
   creation_travaux:         { label: "Créat. travaux",     color: "#0277bd", bg: "#e3f2fd" },
   soumission_travaux:       { label: "Soumis. travaux",    color: "#6a1b9a", bg: "#f3e5f5" },
+  validation_travaux:       { label: "Valid. travaux",     color: "#2e7d32", bg: "#e8f5e9" },
+  rejet_travaux:            { label: "Rejet travaux",      color: "#c62828", bg: "#ffebee" },
   suppression_travaux:      { label: "Suppr. travaux",     color: "#b71c1c", bg: "#ffebee" },
   // ── Annulations ────────────────────────────────────────────────
   annulation_action:        { label: "Annulation",         color: "#4a148c", bg: "#f3e5f5" },

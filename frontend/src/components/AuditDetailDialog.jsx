@@ -5,6 +5,7 @@ export default function AuditDetailDialog({ row, onClose }) {
   const changes  = parsed.changes  || null;
   const snapshot = parsed.snapshot || null;
   const label    = parsed.label    || row.detail || "";
+  const motif    = parsed.motif    || null;
 
   return (
     <div className="dialog-backdrop" onClick={onClose}>
@@ -49,6 +50,23 @@ export default function AuditDetailDialog({ row, onClose }) {
             <span><strong>Superviseur :</strong> {row.superviseur_display}</span>
           )}
         </div>
+
+        {/* Motif de rejet (si présent) */}
+        {motif && (
+          <div style={{
+            margin: "0", padding: "10px 20px",
+            background: "#fff8e1", borderBottom: "1px solid #ffe082",
+            display: "flex", alignItems: "flex-start", gap: 10,
+          }}>
+            <span style={{ fontSize: 16 }}>⚠️</span>
+            <div>
+              <p style={{ margin: 0, fontWeight: 700, fontSize: 12, color: "#e65100", textTransform: "uppercase", letterSpacing: 0.5 }}>
+                Motif du rejet
+              </p>
+              <p style={{ margin: "3px 0 0", fontSize: 13, color: "#333" }}>{motif}</p>
+            </div>
+          </div>
+        )}
 
         {/* Contenu */}
         <div style={{ padding: "16px 20px 20px", maxHeight: 420, overflowY: "auto" }}>

@@ -8,6 +8,7 @@ export const ficheTravauxInitial = {
   periodeTravauxDebut: "",
   periodeTravauxFin: "",
   nbPersonnes: "",
+  salaireTotal: "",
   consommables: [],
   repartitions: [],
   observations: "",

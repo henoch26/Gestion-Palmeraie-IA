@@ -56,7 +56,9 @@ function buildPDF(fiche, totals) {
   doc.text("Superviseur :", margin, y);
   doc.setFont("helvetica", "bold");
   doc.setTextColor(34, 34, 34);
-  doc.text(fiche.superviseur_general || "—", margin + 28, y);
+  const supNomRecolte = fiche.superviseur_general || "—";
+  const supTelRecolte = fiche.superviseur_general_telephone ? `  •  ${fiche.superviseur_general_telephone}` : "";
+  doc.text(supNomRecolte + supTelRecolte, margin + 28, y);
   y += 7;
 
   // ── Adjoints ──
@@ -292,7 +294,14 @@ export default function FicheDialog({ open, onClose, fiche }) {
         {/* En-tete */}
         <div className="fiche-dialog-grid">
           <div><strong>Date :</strong> {fiche.date}</div>
-          <div><strong>Superviseur :</strong> {fiche.superviseur_general || "-"}</div>
+          <div style={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: 6 }}>
+            <strong>Superviseur :</strong> {fiche.superviseur_general || "-"}
+            {fiche.superviseur_general_telephone && (
+              <span style={{ marginLeft: 4, fontSize: 12, fontWeight: 700, background: "#e3f2fd", color: "#1565c0", padding: "2px 8px", borderRadius: 10, border: "1px solid #90caf9" }}>
+                📞 {fiche.superviseur_general_telephone}
+              </span>
+            )}
+          </div>
           <div><strong>Statut :</strong> {fiche.statut_display || fiche.statut || "-"}</div>
           <div><strong>Total régimes :</strong> {fmt(totalRegimes)}</div>
           <div><strong>Prix récolte :</strong> {fmt(totalPrix)} FCFA</div>
@@ -377,33 +386,6 @@ export default function FicheDialog({ open, onClose, fiche }) {
                   </div>
                 );
               })}
-            </div>
-          )}
-        </div>
-
-        {/* Reçus de vente */}
-        <div className="fiche-dialog-section">
-          <h4>Reçus de vente</h4>
-          {recus.length === 0 ? (
-            <p>Aucun reçu</p>
-          ) : (
-            <div className="fiche-dialog-lines">
-              {recus.map((r) => (
-                <div key={r.id} className="fiche-line-card">
-                  <div className="fiche-line-head">
-                    <strong>{r.client || "-"}</strong>
-                    <span>Date : {r.date || "-"}</span>
-                    <span>Montant : {fmt(r.montant)} FCFA</span>
-                  </div>
-                  <div className="fiche-line-details">
-                    <span className="fiche-chip">Pesée : {r.pesee_kg} kg</span>
-                    <span className="fiche-chip">Non conformes : {r.non_conformes_pct}%</span>
-                    {r.reference_facture && <span className="fiche-chip">Facture : {r.reference_facture}</span>}
-                    {r.mode_paiement    && <span className="fiche-chip">Paiement : {r.mode_paiement}</span>}
-                    {r.vehicule_transport && <span className="fiche-chip">Véhicule : {r.vehicule_transport}</span>}
-                  </div>
-                </div>
-              ))}
             </div>
           )}
         </div>

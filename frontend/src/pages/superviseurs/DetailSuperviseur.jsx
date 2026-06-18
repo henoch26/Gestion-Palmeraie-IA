@@ -263,7 +263,7 @@ export default function DetailSuperviseur() {
   if (loading) return <div className="page"><LogoLoader compact size={80} /></div>;
   if (!data)   return <div className="page"><p style={{ color: "#aaa" }}>Superviseur introuvable.</p></div>;
 
-  const { superviseur, user_info, kpis, regimes, recent_fiches, permissions } = data;
+  const { superviseur, user_info, kpis, regimes, recent_fiches, recent_travaux, permissions } = data;
   const nomComplet = `${superviseur.nom} ${superviseur.prenom || ""}`.trim();
 
   const kpiCards = [
@@ -291,8 +291,7 @@ export default function DetailSuperviseur() {
           <div>
             <h2 style={{ margin: 0 }}>{nomComplet}</h2>
             <p className="dashboard-subtitle" style={{ margin: 0 }}>
-              {superviseur.code}
-              {user_info?.username && ` · ${user_info.username}`}
+              {user_info?.username && `${user_info.username}`}
               {superviseur.telephone && ` · ${superviseur.telephone}`}
               <span style={{
                 marginLeft: 10, padding: "2px 10px", borderRadius: 12, fontSize: 11, fontWeight: 700,
@@ -348,15 +347,15 @@ export default function DetailSuperviseur() {
             )}
           </div>
 
-          <div className="card" style={{ padding: 20 }}>
-            <h3 style={{ margin: "0 0 14px", fontSize: 15 }}>Fiches supervisees recentes</h3>
+          <div className="card" style={{ padding: 20, marginBottom: 20 }}>
+            <h3 style={{ margin: "0 0 14px", fontSize: 15 }}>Fiches de recolte recentes</h3>
             {recent_fiches.length === 0 ? (
-              <p style={{ color: "#aaa", fontSize: 14 }}>Aucune fiche enregistree.</p>
+              <p style={{ color: "#aaa", fontSize: 14 }}>Aucune fiche de recolte enregistree.</p>
             ) : (
               <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
                 <thead>
                   <tr style={{ background: "#f5f5f5" }}>
-                    {["Date", "Statut", "Recolteurs", "Total regimes", "Depenses (FCFA)"].map((h) => (
+                    {["Date", "Statut", "Recolteurs", "Total regimes", "Depenses recolte (FCFA)"].map((h) => (
                       <th key={h} style={{ padding: "8px 12px", textAlign: "left", fontWeight: 600, color: "#555" }}>{h}</th>
                     ))}
                   </tr>
@@ -375,6 +374,49 @@ export default function DetailSuperviseur() {
                         <td style={{ padding: "8px 12px" }}>{f.nb_recolteurs}</td>
                         <td style={{ padding: "8px 12px", fontWeight: 600 }}>{fmt(f.total_regimes)}</td>
                         <td style={{ padding: "8px 12px" }}>{fmtF(f.depense_total)}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            )}
+          </div>
+
+          <div className="card" style={{ padding: 20 }}>
+            <h3 style={{ margin: "0 0 14px", fontSize: 15 }}>Fiches de travaux recentes</h3>
+            {!recent_travaux || recent_travaux.length === 0 ? (
+              <p style={{ color: "#aaa", fontSize: 14 }}>Aucune fiche de travaux enregistree.</p>
+            ) : (
+              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+                <thead>
+                  <tr style={{ background: "#e8f5e9" }}>
+                    {["Periode", "Nature", "Statut", "Avancement", "Nb pers.", "Salaires travail. (FCFA)", "Cout total (FCFA)"].map((h) => (
+                      <th key={h} style={{ padding: "8px 12px", textAlign: "left", fontWeight: 600, color: "#1b5e20" }}>{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {recent_travaux.map((t, i) => {
+                    const s = STATUT_STYLE[t.statut] || STATUT_STYLE.brouillon;
+                    const AVA_COLOR = { planifie: "#1565c0", en_cours: "#e65100", termine: "#2e7d32" };
+                    const AVA_LABEL = { planifie: "Planifié", en_cours: "En cours", termine: "Terminé" };
+                    return (
+                      <tr key={t.id} style={{ borderTop: "1px solid #eee", background: i % 2 ? "#f9fbe7" : "#fff" }}>
+                        <td style={{ padding: "8px 12px", fontWeight: 600 }}>{t.periode || `#${t.id}`}</td>
+                        <td style={{ padding: "8px 12px", color: "#555" }}>{t.nature || "—"}</td>
+                        <td style={{ padding: "8px 12px" }}>
+                          <span style={{ ...s, padding: "2px 10px", borderRadius: 12, fontSize: 11, fontWeight: 700 }}>
+                            {t.statut}
+                          </span>
+                        </td>
+                        <td style={{ padding: "8px 12px" }}>
+                          <span style={{ color: AVA_COLOR[t.statut_avancement] || "#666", fontWeight: 600, fontSize: 12 }}>
+                            {AVA_LABEL[t.statut_avancement] || t.statut_avancement || "—"}
+                          </span>
+                        </td>
+                        <td style={{ padding: "8px 12px" }}>{t.nb_personnes ?? "—"}</td>
+                        <td style={{ padding: "8px 12px", color: COLORS.teal }}>{fmtF(t.salaire_total)}</td>
+                        <td style={{ padding: "8px 12px", fontWeight: 700, color: COLORS.green }}>{fmtF(t.cout_total)}</td>
                       </tr>
                     );
                   })}

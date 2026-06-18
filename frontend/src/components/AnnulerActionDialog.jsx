@@ -8,6 +8,7 @@ const REVERSIBLE = new Set([
   "modification_materiel",
   "modification_recolteur",
   "soumission_fiche",
+  "suppression_recolteur",
 ]);
 
 export function canRevert(row) {
@@ -20,6 +21,7 @@ const ACTION_LABELS = {
   modification_materiel:  "Modification matériel",
   modification_recolteur: "Modification récolteur",
   soumission_fiche:       "Soumission fiche récolte",
+  suppression_recolteur:  "Suppression récolteur",
 };
 
 export default function AnnulerActionDialog({ row, onClose, onReverted }) {
@@ -97,10 +99,17 @@ export default function AnnulerActionDialog({ row, onClose, onReverted }) {
           </div>
 
           {/* Avertissement */}
-          <p style={{ fontSize: 13, color: "#333", marginBottom: 14 }}>
-            Cette opération va <strong>restaurer les valeurs précédentes</strong> et notifier
-            le superviseur. L'action sera marquée comme annulée dans le journal.
-          </p>
+          {row.action === "suppression_recolteur" ? (
+            <p style={{ fontSize: 13, color: "#333", marginBottom: 14 }}>
+              Cette opération va <strong>recréer le récolteur avec ses données originales</strong> et
+              restaurer ses liens aux fiches de récolte existantes. Le superviseur sera notifié.
+            </p>
+          ) : (
+            <p style={{ fontSize: 13, color: "#333", marginBottom: 14 }}>
+              Cette opération va <strong>restaurer les valeurs précédentes</strong> et notifier
+              le superviseur. L'action sera marquée comme annulée dans le journal.
+            </p>
+          )}
 
           {/* Champ raison */}
           <div>

@@ -12,6 +12,7 @@ from rest_framework.response import Response
 from utils.permissions import IsAdmin
 from utils.audit import log_action
 from .models import Notification, PasswordResetToken, UserProfile, AuditLog, Droit
+from .utils import create_notification
 from .serializers import CreateUserSerializer, DroitSerializer, ProfileSerializer, UpdateUserSerializer, UserListSerializer, AuditLogSerializer
 
 
@@ -291,6 +292,18 @@ def users_detail(request, pk):
                     status=403,
                 )
 
+        # ── Capture de l'état AVANT la mise à jour ─────────────────────
+        _up = getattr(user, "profile", None)
+        before = {
+            "username":    user.username,
+            "first_name":  user.first_name or "",
+            "last_name":   user.last_name or "",
+            "email":       user.email or "",
+            "is_active":   user.is_active,
+            "role":        getattr(_up, "role", None),
+            "permissions": sorted(_up.droits.values_list("code", flat=True)) if _up else [],
+        }
+
         # Mise à jour des permissions (si présentes dans la requête)
         if "permissions" in request.data:
             codes = request.data.get("permissions") or []
@@ -303,8 +316,8 @@ def users_detail(request, pk):
         serializer.update(user, serializer.validated_data)
         user.refresh_from_db()
 
-        # Réinitialisation par l'admin : invalider le token pour forcer la reconnexion
-        if is_password_reset:
+        # Réinitialisation ou désactivation : invalider le token immédiatement
+        if is_password_reset or request.data.get("is_active") is False:
             Token.objects.filter(user=user).delete()
 
         # ── Audit ──────────────────────────────────────────────────────
@@ -321,23 +334,23 @@ def users_detail(request, pk):
         for field, label in _USER_LABELS.items():
             if field in request.data:
                 if field == "password":
-                    continue  # ne pas loguer le mot de passe
-                old_val = getattr(user, field, None)
-                if field == "role":
-                    old_val = getattr(getattr(user, "profile", None), "role", None)
-                elif field == "is_active":
-                    old_val = user.is_active
-                elif field == "permissions":
-                    old_val = sorted(user.profile.droits.values_list("code", flat=True)) if hasattr(user, "profile") else []
+                    continue
+                old_val = before.get(field)
                 new_val = request.data[field]
                 if str(old_val or "") != str(new_val or ""):
                     changes.append({"field": label, "old": str(old_val or ""), "new": str(new_val or "")})
         if is_password_reset:
             changes.append({"field": "Mot de passe", "old": "***", "new": "réinitialisé par l'admin"})
-        user.refresh_from_db()
+
+        # Cible superviseur : l'action apparaît dans son MonAudit
+        refreshed_profile = getattr(user, "profile", None)
+        sup_target = user if refreshed_profile and refreshed_profile.role in ("superviseur", "superviseur_adjoint") else None
+
         log_action(request.user, "modification_utilisateur",
                    detail=f"Compte « {user.username} » modifié.",
-                   meta={"changes": changes})
+                   meta={"changes": changes},
+                   superviseur=sup_target)
+
         return Response(UserListSerializer(user).data)
 
     if request.method == "DELETE":

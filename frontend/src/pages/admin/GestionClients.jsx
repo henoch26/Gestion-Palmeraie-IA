@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import ConfirmDialog from "../../components/ConfirmDialog.jsx";
 import { useToast } from "../../context/ToastContext.jsx";
+import { useAuth } from "../../context/AuthContext.jsx";
 import { createClient, deleteClient, listClients, updateClient } from "../../services/clientService.js";
 
 const EMPTY = { nom: "", telephone: "", adresse: "" };
@@ -113,6 +114,8 @@ function ClientDialog({ open, onClose, onSubmit, initial }) {
 
 export default function GestionClients() {
   const { pushToast } = useToast();
+  const { hasPermission } = useAuth();
+  const canWrite = hasPermission("gerer_clients");
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
@@ -174,9 +177,11 @@ export default function GestionClients() {
     <div className="page-container">
       <div className="page-header">
         <h2>Gestion des clients</h2>
-        <button className="btn-primary" onClick={() => { setEditing(null); setOpenForm(true); }}>
-          + Ajouter un client
-        </button>
+        {canWrite && (
+          <button className="btn-primary" onClick={() => { setEditing(null); setOpenForm(true); }}>
+            + Ajouter un client
+          </button>
+        )}
       </div>
 
       {/* Barre de recherche */}
@@ -218,16 +223,18 @@ export default function GestionClients() {
                   {row.created_at ? new Date(row.created_at).toLocaleDateString("fr-FR") : "—"}
                 </td>
                 <td style={{ padding: "8px 14px" }}>
-                  <div style={{ display: "flex", gap: 6, flexWrap: "nowrap" }}>
-                    <button className="btn-secondary btn-sm"
-                      onClick={() => { setEditing(row); setOpenForm(true); }}>
-                      Modifier
-                    </button>
-                    <button className="btn-danger btn-sm"
-                      onClick={() => setToDelete(row)}>
-                      Supprimer
-                    </button>
-                  </div>
+                  {canWrite && (
+                    <div style={{ display: "flex", gap: 6, flexWrap: "nowrap" }}>
+                      <button className="btn-secondary btn-sm"
+                        onClick={() => { setEditing(row); setOpenForm(true); }}>
+                        Modifier
+                      </button>
+                      <button className="btn-danger btn-sm"
+                        onClick={() => setToDelete(row)}>
+                        Supprimer
+                      </button>
+                    </div>
+                  )}
                 </td>
               </tr>
             ))}

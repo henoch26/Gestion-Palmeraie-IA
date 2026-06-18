@@ -162,6 +162,7 @@ export default function GestionUtilisateurs() {
     if (!editingUser && form.password.trim().length < 6) errs.password = "Au moins 6 caracteres";
     if (editingUser && !accountOwned && form.password && form.password.length < 6) errs.password = "Au moins 6 caracteres";
     if (editingUser && accountOwned && resetPwd && resetPwd.length < 6) errs.resetPwd = "Au moins 6 caracteres";
+    if (!editingUser && !form.email.trim()) errs.email = "Email requis — indispensable pour reinitialiser le mot de passe";
     return errs;
   };
 
@@ -324,9 +325,11 @@ export default function GestionUtilisateurs() {
                         Voir
                       </button>
                     )}
-                    <button className="btn btn-sm btn-secondary" onClick={() => openEdit(u)}>
-                      Modifier
-                    </button>
+                    {u.id !== currentUser?.id && (
+                      <button className="btn btn-sm btn-secondary" onClick={() => openEdit(u)}>
+                        Modifier
+                      </button>
+                    )}
                     {u.id !== currentUser?.id && (
                       <>
                         <button
@@ -519,7 +522,9 @@ export default function GestionUtilisateurs() {
                       <small className="mfield-hint">&#128241; Utilise pour envoyer les identifiants via WhatsApp</small>
                     </div>
                     <div className="mfield">
-                      <label className="mfield-label">Adresse email</label>
+                      <label className="mfield-label">
+                        Adresse email {!editingUser && <span className="req">*</span>}
+                      </label>
                       <input
                         className={`mfield-input${errors.email ? " mfield-input--error" : ""}`}
                         type="email"
@@ -528,7 +533,9 @@ export default function GestionUtilisateurs() {
                         onChange={handleChange}
                         placeholder="ex: superviseur@example.com"
                       />
-                      <small className="mfield-hint">&#9993; Utilise pour envoyer les identifiants par email</small>
+                      <small className="mfield-hint">
+                        &#9993; {!editingUser ? "Requis — permet la reinitialisation du mot de passe" : "Utilise pour envoyer les identifiants par email"}
+                      </small>
                       {errors.email && <span className="mfield-error">{errors.email}</span>}
                     </div>
                   </>

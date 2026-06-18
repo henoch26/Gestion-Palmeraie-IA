@@ -210,6 +210,105 @@ export default function DetailRecolteur() {
     };
   }, [data]);
 
+  const secteurChart = useMemo(() => {
+    if (!data?.secteurs?.length) return null;
+    const rows = data.secteurs;
+
+    const stackedBarLabelsPlugin = {
+      id: "secteurStackedLabels",
+      afterDatasetsDraw(chart) {
+        if (chart.width < 320) return;
+        const { ctx } = chart;
+        const datasets = chart.data.datasets;
+
+        datasets.forEach((dataset, di) => {
+          const meta = chart.getDatasetMeta(di);
+          if (meta.hidden) return;
+          meta.data.forEach((bar, i) => {
+            const value = Number(dataset.data[i]) || 0;
+            if (!value) return;
+            const { x, y, base } = bar.getProps(["x", "y", "base"], true);
+            const segH = Math.abs(base - y);
+            if (segH < 18) return;
+            ctx.save();
+            ctx.fillStyle = "#fff";
+            ctx.textAlign = "center";
+            ctx.textBaseline = "middle";
+            ctx.font = "bold 10px Manrope, sans-serif";
+            ctx.shadowColor = "rgba(0,0,0,0.4)";
+            ctx.shadowBlur = 3;
+            ctx.fillText(fmtInt(value), x, (y + base) / 2);
+            ctx.restore();
+          });
+        });
+
+        const nBars = chart.data.labels.length;
+        for (let i = 0; i < nBars; i++) {
+          let total = 0;
+          let topY = Infinity;
+          datasets.forEach((ds, di) => {
+            const meta = chart.getDatasetMeta(di);
+            if (meta.hidden) return;
+            total += Number(ds.data[i]) || 0;
+            const { y } = meta.data[i].getProps(["y"], true);
+            if (y < topY) topY = y;
+          });
+          if (!total) continue;
+          const { x } = chart.getDatasetMeta(0).data[i].getProps(["x"], true);
+          ctx.save();
+          ctx.fillStyle = "#1f4e79";
+          ctx.textAlign = "center";
+          ctx.textBaseline = "bottom";
+          ctx.font = "bold 11px Manrope, sans-serif";
+          ctx.fillText(fmtInt(total), x, topY - 4);
+          ctx.restore();
+        }
+      },
+    };
+
+    return {
+      title: `${data.recolteur?.nom} — Régimes par secteur (${data.year})`,
+      type: "bar",
+      data: {
+        labels: rows.map((r) => r.code),
+        datasets: [
+          { label: "Grands", data: rows.map((r) => r.grands), backgroundColor: `${COLORS.green}cc`, stack: "regimes" },
+          { label: "Moyens", data: rows.map((r) => r.moyens), backgroundColor: `${COLORS.blue}cc`,  stack: "regimes" },
+          { label: "Petits", data: rows.map((r) => r.petits), backgroundColor: `${COLORS.amber}cc`, stack: "regimes" },
+        ],
+      },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        layout: { padding: { top: 24 } },
+        plugins: {
+          legend: { position: "bottom" },
+          subtitle: {
+            display: true,
+            text: "en nombre de régimes",
+            color: "#999",
+            font: { size: 11, style: "italic" },
+            padding: { bottom: 6 },
+          },
+          tooltip: {
+            callbacks: {
+              title: (items) => {
+                const idx = items[0].dataIndex;
+                const s = rows[idx];
+                return `${s.code}${s.nom ? ` — ${s.nom}` : ""}`;
+              },
+              label: (ctx) => `${ctx.dataset.label} : ${fmtInt(ctx.parsed.y)} rég.`,
+            },
+          },
+        },
+        scales: {
+          x: { stacked: true, grid: { display: false } },
+          y: { stacked: true, beginAtZero: true, ticks: { precision: 0 } },
+        },
+      },
+      plugins: [stackedBarLabelsPlugin],
+    };
+  }, [data]);
+
   const regimesChart = useMemo(() => {
     if (!data) return null;
     const vals = [data.stats.grands, data.stats.moyens, data.stats.petits];
@@ -388,9 +487,10 @@ export default function DetailRecolteur() {
           </div>
 
           {/* Graphiques */}
-          <section className="charts-grid" style={{ marginBottom: 24 }}>
+          <section className="charts-grid" style={{ marginBottom: 24, gridTemplateColumns: "repeat(2, minmax(280px, 1fr))" }}>
             {monthlyChart && <ChartCard {...monthlyChart} onClick={() => setActiveChart(monthlyChart)} />}
             {yearlyChart && <ChartCard {...yearlyChart} onClick={() => setActiveChart(yearlyChart)} />}
+            {secteurChart && <ChartCard {...secteurChart} onClick={() => setActiveChart(secteurChart)} />}
             {regimesChart && <ChartCard {...regimesChart} onClick={() => setActiveChart(regimesChart)} />}
           </section>
 
