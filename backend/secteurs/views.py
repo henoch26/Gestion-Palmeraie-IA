@@ -1,3 +1,19 @@
+"""
+secteurs/views.py — API REST pour les secteurs de la palmeraie.
+
+Expose SecteurViewSet (ModelViewSet) :
+  GET/POST        /api/secteurs/              → liste et creation
+  GET/PATCH/DELETE /api/secteurs/:id/         → detail, modification, suppression
+  GET             /api/secteurs/export/       → export Excel de tous les secteurs actifs
+  GET             /api/secteurs/:id/analytics/→ indicateurs de production du secteur
+  GET             /api/secteurs/:id/export/   → export Excel des recoltes du secteur
+
+Le queryset annote chaque secteur avec :
+  production_total — total des regimes recoltes (fiches validees uniquement)
+  last_recolte     — date de la derniere recolte validee
+
+Toute creation/modification/suppression est tracee dans ActionLog.
+"""
 import io
 
 from django.http import HttpResponse

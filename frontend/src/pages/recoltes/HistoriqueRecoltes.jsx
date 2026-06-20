@@ -1,3 +1,19 @@
+/**
+ * HistoriqueRecoltes.jsx — Page centrale de gestion des recoltes.
+ *
+ * La page est organisee en 4 onglets (?tab=) :
+ *   saisie     — Formulaire de creation/edition d'une fiche recolte (superviseur)
+ *   analyses   — Graphiques et KPIs agreges par annee/secteur/regime
+ *   historique — Tableau paginable + filtres ; actions validation/rejet (admin)
+ *   ventes     — Recus de vente associes aux fiches validees
+ *
+ * Acces :
+ *   - superviseur : voit ses propres fiches, peut saisir et soumettre
+ *   - admin : voit toutes les fiches, peut valider/rejeter
+ *   L'API filtre automatiquement selon le role du token.
+ *
+ * Etat global partage entre onglets via RecoltesContext (pendingCount).
+ */
 import { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import {
@@ -27,6 +43,7 @@ import { listClients } from "../../services/clientService.js";
 import { getToken } from "../../services/authService.js";
 import { saveRecolteOffline } from "../../utils/offline.js";
 import useBodyScrollLock from "../../utils/useBodyScrollLock.js";
+import { sanitizeDecimal } from "../../utils/number.js";
 
 const API_BASE = import.meta.env.VITE_API_URL || "http://127.0.0.1:8000/api";
 
@@ -92,8 +109,30 @@ function VenteDialog({ open, row, isAdmin, prixOfficielGlobal, historyRows, clie
 
   const submit = () => {
     const errs = {};
+    const today = new Date().toISOString().split("T")[0];
+
     if (!form.fiche) errs.fiche = "Fiche de recolte requise";
-    if (!form.date) errs.date = "Date requise";
+
+    if (!form.date) {
+      errs.date = "Date requise";
+    } else if (form.date > today) {
+      errs.date = "La date ne peut pas être dans le futur";
+    } else {
+      const ficheSelected = ficheOptions.find((f) => String(f.id) === String(form.fiche));
+      if (ficheSelected?.date && form.date < ficheSelected.date) {
+        errs.date = `Doit être ≥ date de la fiche (${ficheSelected.date})`;
+      }
+    }
+
+    if (form.pesee_kg !== "" && Number(form.pesee_kg) < 0) {
+      errs.pesee_kg = "La pesée ne peut pas être négative";
+    }
+
+    if (form.non_conformes_pct !== "") {
+      const pct = Number(form.non_conformes_pct);
+      if (pct < 0 || pct > 100) errs.non_conformes_pct = "Valeur entre 0 et 100 %";
+    }
+
     if (!form.montant || Number(form.montant) <= 0) errs.montant = "Montant requis";
     if (Object.keys(errs).length) { setErrors(errs); return; }
 
@@ -233,6 +272,7 @@ function VenteDialog({ open, row, isAdmin, prixOfficielGlobal, historyRows, clie
                   <label className="mfield-label">Date de vente <span style={{ color: "#d32f2f" }}>*</span></label>
                   <input type="date" className={`mfield-input${errors.date ? " mfield-input--error" : ""}`}
                     value={form.date} onChange={(e) => set("date", e.target.value)}
+                    max={new Date().toISOString().split("T")[0]}
                     readOnly={ro} style={ro ? roStyle : undefined} />
                   {errors.date && <span className="mfield-error">{errors.date}</span>}
                 </div>
@@ -259,15 +299,19 @@ function VenteDialog({ open, row, isAdmin, prixOfficielGlobal, historyRows, clie
                 <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 12 }}>
                   <div className="mfield">
                     <label className="mfield-label">Pesee (kg)</label>
-                    <input type="number" min="0" step="0.01" className="mfield-input"
+                    <input type="number" min="0" step="0.01"
+                      className={`mfield-input${errors.pesee_kg ? " mfield-input--error" : ""}`}
                       value={form.pesee_kg} onChange={(e) => set("pesee_kg", e.target.value)}
                       readOnly={ro} style={ro ? roStyle : undefined} />
+                    {errors.pesee_kg && <span className="mfield-error">{errors.pesee_kg}</span>}
                   </div>
                   <div className="mfield">
                     <label className="mfield-label">Non conformes (%)</label>
-                    <input type="number" min="0" max="100" step="0.01" className="mfield-input"
+                    <input type="number" min="0" max="100" step="0.01"
+                      className={`mfield-input${errors.non_conformes_pct ? " mfield-input--error" : ""}`}
                       value={form.non_conformes_pct} onChange={(e) => set("non_conformes_pct", e.target.value)}
                       readOnly={ro} style={ro ? roStyle : undefined} />
+                    {errors.non_conformes_pct && <span className="mfield-error">{errors.non_conformes_pct}</span>}
                   </div>
                 </div>
 
@@ -958,11 +1002,11 @@ export default function HistoriqueRecoltes() {
     clearSimpleError("denombrement");
   };
 
-  // Depenses
+  // Depenses (sanitize: chiffres et point decimal uniquement, pas de negatif)
   const handleDepenseChange = (field, value) => {
     setFiche((prev) => ({
       ...prev,
-      depenses: { ...prev.depenses, [field]: value },
+      depenses: { ...prev.depenses, [field]: sanitizeDecimal(value) },
     }));
   };
 
@@ -970,7 +1014,12 @@ export default function HistoriqueRecoltes() {
   const buildPayload = () => {
     const errors = {};
 
-    if (!fiche.date) errors.date = "Date requise";
+    const today = new Date().toISOString().split("T")[0];
+    if (!fiche.date) {
+      errors.date = "Date requise";
+    } else if (fiche.date > today) {
+      errors.date = "La date ne peut pas être dans le futur";
+    }
     if (!String(fiche.superviseurGeneral || "").trim()) {
       errors.superviseurGeneral = "Superviseur general requis";
     }
@@ -1107,7 +1156,7 @@ export default function HistoriqueRecoltes() {
       setSaving(true);
 
       if (!navigator.onLine) {
-        await saveRecolteOffline(payload);
+        await saveRecolteOffline(payload, getToken());
         setSuccess({ open: true, message: "Fiche sauvegardee hors ligne — sera synchronisee a la reconnexion." });
         return;
       }
@@ -1542,6 +1591,7 @@ export default function HistoriqueRecoltes() {
               name="date"
               className={`fiche-input ${fieldErrors.date ? "input-error" : ""}`}
               value={fiche.date}
+              max={new Date().toISOString().split("T")[0]}
               onChange={handleHeaderChange}
             />
             {fieldErrors.date && <span className="field-error">{fieldErrors.date}</span>}

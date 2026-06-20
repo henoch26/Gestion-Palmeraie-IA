@@ -1,3 +1,15 @@
+"""
+travaux/models.py — Modeles lies aux fiches de travaux agricoles.
+
+Structure :
+  FicheTravaux       — Fiche principale (en-tete, statut, superviseur, secteurs)
+  ConsommableTravaux — Ligne de consommable utilise (produit, quantite, prix)
+  RepartitionTache   — Ligne de repartition par travailleur (nom, tache, salaire)
+
+Calcul du cout total d'une fiche :
+  cout = sum(consommables) + sum(repartitions) + salaire_total
+  Declenche par recalculer_cout() ou recalcule cote frontend dans FicheTravauxDialog.
+"""
 from decimal import Decimal
 
 from django.conf import settings
@@ -5,6 +17,13 @@ from django.db import models
 
 
 class FicheTravaux(models.Model):
+    """Fiche de travaux agricoles creee par un superviseur.
+
+    Cycle de vie du statut : brouillon → soumis → valide (ou rejet → brouillon).
+    Seul le createur peut soumettre et valider. L'admin peut rejeter (retour brouillon).
+    Le champ salaire_total stocke le cumul des salaires journaliers des travailleurs.
+    cout_total_calcule = consommables + repartitions + salaire_total (voir recalculer_cout).
+    """
     STATUT_CHOICES = [
         ("brouillon", "Brouillon"),
         ("soumis", "Soumis"),
@@ -113,17 +132,34 @@ class FicheTravaux(models.Model):
         return base
 
     def recalculer_cout(self):
+        """Recalcule et persiste le cout total de la fiche.
+
+        cout = sum(quantite * prix_unitaire pour chaque consommable)
+             + sum(quantite * prix_unitaire pour chaque repartition de tache)
+             + salaire_total (cumul des salaires journaliers)
+
+        Utilise un UPDATE direct (sans signal post_save) pour eviter
+        les boucles recursives. Met aussi a jour l'instance en memoire.
+        Appele depuis les serializers apres toute modification des sous-listes.
+        """
         total = Decimal("0.00")
         for c in self.consommables.all():
             total += (c.quantite or Decimal("0.00")) * (c.prix_unitaire or Decimal("0.00"))
         for r in self.repartitions.all():
             total += (r.quantite or Decimal("0.00")) * (r.prix_unitaire or Decimal("0.00"))
         total += self.salaire_total or Decimal("0.00")
+        # UPDATE direct pour eviter le declenchement des signaux post_save
         FicheTravaux.objects.filter(pk=self.pk).update(cout_total_calcule=total)
         self.cout_total_calcule = total
 
 
 class ConsommableTravaux(models.Model):
+    """Ligne de consommable utilise dans une fiche de travaux.
+
+    Chaque consommable a une designation, une quantite, une unite et un prix
+    unitaire. Le sous-total (quantite * prix_unitaire) est calcule dans
+    recalculer_cout() de la fiche parente et dans le frontend.
+    """
     fiche = models.ForeignKey(
         FicheTravaux, on_delete=models.CASCADE, related_name="consommables"
     )
@@ -147,6 +183,12 @@ class ConsommableTravaux(models.Model):
 
 
 class RepartitionTache(models.Model):
+    """Ligne de repartition du travail par ouvrier dans une fiche de travaux.
+
+    salaire_total_calcule est automatiquement mis a jour a chaque save()
+    via le override de save() ci-dessous (quantite * prix_unitaire).
+    Ce champ est redondant avec le calcul a la volee mais facilite les exports.
+    """
     fiche = models.ForeignKey(
         FicheTravaux, on_delete=models.CASCADE, related_name="repartitions"
     )

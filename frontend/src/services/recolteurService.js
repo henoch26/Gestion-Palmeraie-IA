@@ -1,3 +1,18 @@
+/**
+ * recolteurService.js — Acces aux donnees du personnel (anciennement "recolteurs").
+ *
+ * Toutes les fonctions pointent vers /api/personnel/ (endpoint Django).
+ * Les alias "Recolteur" et "Personnel" sont equivalents — les deux noms
+ * coexistent pour compatibilite avec le code existant.
+ *
+ * Fonctions exportees :
+ *   listPersonnel()                      — GET  liste complete
+ *   createPersonnelMultipart(formData)   — POST creation avec photo (FormData)
+ *   updatePersonnelMultipart(id, fd)     — PUT  mise a jour avec photo (FormData)
+ *   deletePersonnel(id)                  — DELETE
+ *   getPersonnelStats(year)              — GET  stats agregees par annee
+ *   getPersonnelAnalytics(id, year, cb)  — GET  detail analytique d'un agent
+ */
 import { apiDelete, apiGet, apiPatch, apiPost, apiPostMultipart, apiPut, apiPutMultipart } from "../api/axios.js";
 import { endpoints } from "../api/endpoints.js";
 

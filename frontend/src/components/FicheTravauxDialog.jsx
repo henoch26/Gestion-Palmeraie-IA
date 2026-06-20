@@ -1,3 +1,19 @@
+/**
+ * FicheTravauxDialog.jsx — Dialog de detail d'une fiche de travaux.
+ *
+ * Affiche le recapitulatif d'une fiche travaux : nature, secteur, consommables,
+ * repartition des taches par agent, et cout total calcule cote serveur.
+ * Permet l'impression PDF via jsPDF + jspdf-autotable.
+ *
+ * Cout total = somme(consommables) + somme(salaires agents)
+ *   — recalcule automatiquement par recalculer_cout() a chaque modification
+ *     (voir backend/travaux/models.py).
+ *
+ * Props :
+ *   fiche      — Objet FicheTravaux complet (avec consommables et repartitions)
+ *   onClose    — Callback de fermeture
+ *   readOnly   — Si true, masque les boutons d'action admin
+ */
 import { jsPDF } from "jspdf";
 import autoTable from "jspdf-autotable";
 import useBodyScrollLock from "../utils/useBodyScrollLock.js";

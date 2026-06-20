@@ -1,3 +1,22 @@
+"""
+recolteurs/views.py — API REST pour la gestion du personnel (recolteurs).
+
+Expose PersonnelViewSet (ModelViewSet) :
+  GET/POST         /api/recolteurs/              → liste et creation
+  GET/PATCH/DELETE /api/recolteurs/:id/          → detail, modification, suppression
+  GET              /api/recolteurs/stats/         → statistiques annuelles par recolteur
+  GET              /api/recolteurs/:id/analytics/ → analytiques detaillees d'un recolteur
+  GET              /api/recolteurs/export/        → export Excel du personnel
+
+Le endpoint stats/ annote chaque recolteur avec :
+  grands/moyens/petits — regimes recoltes par type pour l'annee filtree
+  total_regimes        — total tous types confondus
+  fiches_count         — nombre de fiches distinctes auxquelles il a participe
+  last_recolte         — date de sa derniere participation validee
+
+Le endpoint analytics/:id calcule egalement le rang du recolteur parmi
+tous les recolteurs actifs de l'annee (global ou filtre par superviseur).
+"""
 import io
 from decimal import Decimal
 
@@ -227,7 +246,9 @@ class PersonnelViewSet(viewsets.ModelViewSet):
             .aggregate(t=Coalesce(Sum("salaire_calcule"), Decimal("0")))["t"] or 0
         )
 
-        # Rang : si filtre superviseur actif, rang parmi ses propres recolteurs ; sinon global
+        # Rang du recolteur parmi tous les actifs de l'annee.
+        # Si un filtre superviseur est actif, le rang est calcule dans le perimetre
+        # de ce superviseur uniquement (pas le rang global de la palmeraie).
         all_totals = (
             FicheRecolteDetail.objects.filter(ligne__fiche__date__year=year, ligne__fiche__statut="valide", **detail_extra)
             .exclude(ligne__recolteur__isnull=True)

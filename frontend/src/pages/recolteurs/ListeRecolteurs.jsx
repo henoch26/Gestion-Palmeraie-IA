@@ -1,3 +1,15 @@
+/**
+ * ListeRecolteurs.jsx — Annuaire du personnel avec stats et export Excel.
+ *
+ * Fonctionnalites :
+ *   - Liste paginee + recherche par nom/prenom/secteur
+ *   - Creation, modification et suppression d'un agent (avec photo)
+ *   - Statistiques globales annuelles (total recolte, revenus, agents actifs)
+ *   - Export Excel via GET /api/recolteurs/export/?year=YYYY (backend Django)
+ *   - Lien vers la page DetailRecolteur (/recolteurs/:id) pour l'analytique
+ *
+ * Acces : admin (gestion complete) ou superviseur avec permission gerer_recolteurs.
+ */
 import { useEffect, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import DataTable from "../../components/DataTable.jsx";

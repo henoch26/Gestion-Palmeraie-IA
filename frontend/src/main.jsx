@@ -8,7 +8,7 @@ import { RecoltesProvider } from "./context/RecoltesContext.jsx";
 import OfflineBanner from "./components/OfflineBanner.jsx";
 
 // Enregistrement du Service Worker (mode prod uniquement pour éviter les conflits HMR)
-if ("serviceWorker" in navigator) {
+if ("serviceWorker" in navigator && import.meta.env.PROD) {
   window.addEventListener("load", () => {
     navigator.serviceWorker
       .register("/sw.js")

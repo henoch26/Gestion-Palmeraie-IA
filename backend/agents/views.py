@@ -1,3 +1,20 @@
+"""
+agents/views.py — API REST pour les agents terrain et les superviseurs generaux.
+
+Expose deux ViewSets :
+  AgentTerrainViewSet       — CRUD des agents terrain (annuaire)
+  SuperviseurGeneralViewSet — CRUD des superviseurs + 3 actions supplementaires :
+
+    stats/:id/          — KPIs complets du superviseur (fiches, depenses, recettes,
+                          production mensuelle, fiches recentes recolte et travaux)
+    secteurs-stats/:id/ — Production par secteur pour ce superviseur
+    recolteurs-stats/:id/— Performance des recolteurs pour ce superviseur
+
+Nota bene sur le calcul des depenses dans stats/:id/ :
+  total_depenses = depenses_recolte (FicheRecolte.depense_total)
+                 + cout_travaux (consommables + repartitions + salaire_total)
+  Ce cumul couvre l'integralite des charges operationnelles du superviseur.
+"""
 from datetime import date
 
 from django.db.models import Sum, Count

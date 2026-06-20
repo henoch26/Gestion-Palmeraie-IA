@@ -1,3 +1,19 @@
+"""
+travaux/views.py — API REST pour les fiches de travaux agricoles.
+
+Expose FicheTravauxViewSet (ModelViewSet) :
+  GET/POST   /api/travaux/           → liste et creation
+  GET/PATCH  /api/travaux/:id/       → detail et modification partielle
+  DELETE     /api/travaux/:id/       → suppression (interdit si valide)
+  GET        /api/travaux/export/    → export Excel (admin uniquement)
+
+Regles metier importantes :
+  - Un admin ne peut pas creer de fiche travaux (action reservee aux superviseurs).
+  - Une fiche validee ne peut etre modifiee que par l'admin.
+  - La suppression d'une fiche validee est interdite a tous.
+  - Chaque changement de statut declenche une notification au superviseur createur.
+  - Toute modification est tracee dans ActionLog via log_action().
+"""
 import io
 
 from django.http import HttpResponse
@@ -34,9 +50,15 @@ def _style_header(ws, headers, fill_color="1F4E79"):
 
 
 def _notify_statut_travaux(instance, old_statut, new_statut, actor=None):
+    """Envoie une notification in-app au superviseur lors d'un changement de statut.
+
+    Evite de notifier le superviseur d'une action qu'il a lui-meme effectuee
+    (ex : il valide sa propre fiche). Seuls les changements vers 'valide'
+    ou le rejet (brouillon depuis soumis/valide) declenchent une notification.
+    """
     if not new_statut or new_statut == old_statut or not instance.created_by:
         return
-    # Ne pas notifier le superviseur d'une action qu'il a lui-même effectuée
+    # Ne pas notifier le superviseur s'il est lui-meme l'acteur de l'action
     if actor and actor.pk == instance.created_by.pk:
         return
     ref = str(instance.periode_travaux) if instance.periode_travaux else f"#{instance.id}"
@@ -144,17 +166,28 @@ class FicheTravauxViewSet(viewsets.ModelViewSet):
         return super().get_permissions()
 
     def _check_statut_transition(self, request, instance=None):
+        """Verifie que la transition de statut demandee est autorisee.
+
+        Regles :
+          - Seul le createur peut passer une fiche a 'valide'.
+          - Seul l'admin peut modifier une fiche deja validee.
+          - Quand l'admin modifie une fiche validee, le motif est stocke
+            sur l'instance (_audit_motif) pour etre inclus dans le log.
+
+        Retourne None si la transition est autorisee, ou une Response d'erreur.
+        """
         new_statut = request.data.get("statut")
         is_admin = _is_admin(request.user)
         is_creator = instance and instance.created_by_id == request.user.id
         if new_statut == "valide" and not is_creator:
             return Response(
-                {"detail": "Seul le créateur de la fiche peut la valider."},
+                {"detail": "Seul le createur de la fiche peut la valider."},
                 status=403,
             )
         if instance and instance.statut == "valide" and not is_admin:
-            return Response({"detail": "Seul l'administrateur peut modifier une fiche validée."}, status=403)
+            return Response({"detail": "Seul l'administrateur peut modifier une fiche validee."}, status=403)
         if instance and instance.statut == "valide" and is_admin:
+            # Stocke le motif sur l'instance pour le recuperer dans le log d'audit
             instance._audit_user = request.user
             instance._audit_motif = request.data.get("motif", "")
         return None

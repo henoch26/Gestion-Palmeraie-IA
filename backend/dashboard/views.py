@@ -1,3 +1,28 @@
+"""
+dashboard/views.py — Vue de synthese avec KPIs et donnees graphiques.
+
+Expose un unique endpoint : GET /api/dashboard/summary/
+
+Parametres de filtre (query params) :
+  year        — Annee de reference (defaut : annee courante)
+  secteur     — ID de secteur pour filtrer la production
+  recolteur   — ID de recolteur pour filtrer la production
+  regime_type — Type de regime : grands | moyens | petits
+  years       — Liste d'annees separees par virgule pour les graphiques multi-annees
+
+Comportement selon le role :
+  Admin       — Voit toutes les fiches validees de tous les superviseurs
+  Superviseur — Ne voit que ses propres fiches validees
+
+Structure de la reponse :
+  stats   — KPIs chiffres (production, financier, secteurs, recolteurs)
+  tables  — Tableaux detailles (secteurs_detail, recolteurs_detail)
+  charts  — Series de donnees pour les graphiques Chart.js
+  lists   — Listes rapides des 5 derniers elements par categorie
+  filters — Echo des filtres actifs (secteur, recolteur, regime_type)
+
+Important : seules les fiches avec statut='valide' sont incluses dans les calculs.
+"""
 from datetime import date
 from decimal import Decimal
 

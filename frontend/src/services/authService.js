@@ -1,4 +1,24 @@
-// Service d'authentification (API backend)
+/**
+ * authService.js — Gestion de la session utilisateur (login, logout, token).
+ *
+ * La session est stockee dans sessionStorage (cle "palmeraie_auth") sous la forme :
+ *   { token: "...", user: { id, username, role, permissions, ... } }
+ *
+ * sessionStorage a ete choisi plutot que localStorage pour que la session
+ * expire automatiquement a la fermeture du navigateur (securite).
+ *
+ * Fonctions exportees :
+ *   getStoredAuth()          — Lecture de la session courante (ou null)
+ *   login(credentials)       — Appel POST /auth/login/ + stockage du token
+ *   logout()                 — Suppression de la session
+ *   getToken()               — Raccourci pour recuperer le token seul
+ *   updateProfile(data)      — PATCH /auth/profile/
+ *   updateStoredAuth(data)   — Met a jour sessionStorage sans appel API
+ *   forgotPassword(email)    — POST /auth/forgot-password/
+ *   resetPassword(tok, pwd)  — POST /auth/reset-password/
+ *   refreshMe()              — GET /auth/me/ pour rafraichir permissions/role
+ *   changePassword({...})    — POST /auth/change-password/
+ */
 
 const STORAGE_KEY = "palmeraie_auth";
 const API_BASE = import.meta.env.VITE_API_URL || "http://127.0.0.1:8000/api";

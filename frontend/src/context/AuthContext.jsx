@@ -1,3 +1,24 @@
+/**
+ * AuthContext.jsx — Contexte React global pour l'authentification.
+ *
+ * Fournit via useAuth() :
+ *   user            — Objet utilisateur complet (id, username, role, permissions…)
+ *   token           — Token DRF stocke en sessionStorage
+ *   isAuthenticated — true si un token est present
+ *   isAdmin         — true si role === "admin"
+ *   isSuperviseur   — true si role === "superviseur"
+ *   isNonAdmin      — true pour superviseur ET superviseur_adjoint
+ *   mustChangePassword — true si l'admin a force un changement de MDP
+ *   hasPermission(code) — verifie si le user a un droit specifique
+ *                         (l'admin a TOUS les droits implicitement)
+ *   login(credentials)  — Appelle l'API et stocke le token
+ *   logout()            — Efface le token et reinitialise l'etat
+ *   refreshUser(data)   — Met a jour le profil sans nouveau login
+ *   loading             — true pendant la lecture du sessionStorage au demarrage
+ *
+ * Au montage, le contexte restaure la session depuis sessionStorage et
+ * rafraichit les donnees utilisateur depuis /api/me/ pour rester a jour.
+ */
 import { createContext, useContext, useEffect, useMemo, useState } from "react";
 import { getStoredAuth, login as loginService, logout as logoutService, refreshMe, updateStoredAuth } from "../services/authService.js";
 
@@ -7,10 +28,12 @@ export function AuthProvider({ children }) {
   const [auth, setAuth] = useState({ token: null, user: null });
   const [loading, setLoading] = useState(true);
 
+  // Restauration de session au demarrage + rafraichissement depuis l'API
   useEffect(() => {
     const stored = getStoredAuth();
     if (stored?.token) {
       setAuth(stored);
+      // Rafraichit les donnees (role, permissions) en cas de modification cote admin
       refreshMe().then((fresh) => { if (fresh) setAuth(fresh); });
     }
     setLoading(false);

@@ -1,3 +1,13 @@
+"""
+accounts/models.py — Modèles liés aux comptes utilisateurs et à la sécurité.
+
+Contient :
+  Notification       — Alertes in-app envoyées aux utilisateurs
+  Droit              — Permissions fonctionnelles attribuables aux superviseurs
+  UserProfile        — Extension du User Django : rôle, permissions, téléphone
+  PasswordResetToken — Token à usage unique pour la réinitialisation de MDP (1 h)
+  AuditLog           — Journal des modifications de champs sur les fiches validées
+"""
 import secrets
 from datetime import timedelta
 
@@ -7,6 +17,12 @@ from django.utils import timezone
 
 
 class Notification(models.Model):
+    """Notification in-app pour un utilisateur.
+
+    Créée programmatiquement via accounts.utils.create_notification().
+    Affichée dans la cloche de notification (NotificationBell).
+    Le champ `lien` permet de rediriger vers la page concernée au clic.
+    """
     TYPE_CHOICES = [
         ("success", "Succes"),
         ("warning", "Avertissement"),
@@ -47,6 +63,14 @@ class Droit(models.Model):
 
 
 class UserProfile(models.Model):
+    """Extension du modèle User Django via relation OneToOne.
+
+    Stocke le rôle métier, le flag de changement de mot de passe obligatoire,
+    le numéro de téléphone et les droits fonctionnels du superviseur.
+
+    Accès depuis un User : user.profile
+    Accès depuis un UserProfile : profile.user
+    """
     ROLE_ADMIN = "admin"
     ROLE_SUPERVISEUR = "superviseur"
     ROLE_SUPERVISEUR_ADJOINT = "superviseur_adjoint"
@@ -91,7 +115,14 @@ class UserProfile(models.Model):
 
 
 class PasswordResetToken(models.Model):
-    """Token à usage unique pour la réinitialisation de mot de passe (valide 1 h)."""
+    """Token à usage unique pour la réinitialisation de mot de passe (valide 1 h).
+
+    Flux : forgot_password_view() crée le token → envoie un email avec le lien
+    /reset-password?token=XXX → reset_password_view() vérifie et invalide le token.
+
+    create_for_user() supprime d'abord tous les tokens non utilisés du même
+    utilisateur pour éviter l'accumulation en base.
+    """
     user = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.CASCADE,

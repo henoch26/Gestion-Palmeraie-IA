@@ -1,13 +1,39 @@
+/**
+ * api/axios.js — Client HTTP centralise pour toutes les requetes vers l'API Django.
+ *
+ * Toutes les vues doivent passer par ces fonctions plutot que d'appeler fetch()
+ * directement. Elles gerent automatiquement :
+ *   - L'injection du token d'authentification (DRF Token) dans les headers
+ *   - Le Content-Type JSON (sauf pour FormData ou il est omis intentionnellement)
+ *   - La deconnexion forcee si le serveur repond 401 (token revoque ou expire)
+ *   - L'extraction du premier message d'erreur lisible depuis la reponse DRF
+ *
+ * Fonctions exportees :
+ *   apiGet(path)              — GET
+ *   apiPost(path, body)       — POST JSON
+ *   apiPut(path, body)        — PUT JSON
+ *   apiPatch(path, body)      — PATCH JSON
+ *   apiDelete(path)           — DELETE
+ *   apiPostMultipart(path, fd)— POST multipart/form-data
+ *   apiPutMultipart(path, fd) — PUT multipart/form-data
+ *
+ * Configuration : definir VITE_API_URL dans frontend/.env (dev) ou
+ * frontend/.env.production (prod). Defaut : http://127.0.0.1:8000/api
+ */
 import { getToken } from "../services/authService.js";
 
-// Base URL API (configurable via .env)
+// URL de base de l'API, surchargeable via variable d'environnement Vite
 const API_BASE = import.meta.env.VITE_API_URL || "http://127.0.0.1:8000/api";
 const STORAGE_KEY = "palmeraie_auth";
 
-// Helper pour les requetes HTTP
+/**
+ * Fonction interne commune a tous les helpers exports.
+ * Injecte le token, gere les erreurs reseau et HTTP, et deserialise le JSON.
+ */
 async function apiRequest(path, options = {}) {
   const token = getToken();
-  // Ne pas forcer Content-Type pour FormData (le navigateur le gère avec le boundary)
+  // Pour FormData, ne pas forcer Content-Type : le navigateur ajoute
+  // automatiquement le bon boundary multipart — l'ecraser casserait l'upload.
   const isFormData = options.body instanceof FormData;
   const headers = isFormData
     ? { ...(options.headers || {}) }

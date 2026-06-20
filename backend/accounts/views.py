@@ -1,3 +1,22 @@
+"""
+accounts/views.py — Vues d'authentification et de gestion des utilisateurs.
+
+Endpoints publics (AllowAny) :
+  POST /api/login/                → Connexion, retourne un token DRF
+  POST /api/forgot-password/      → Demande de réinitialisation par email
+  POST /api/reset-password/       → Réinitialisation via token (lien email)
+  GET  /api/health/               → Vérification de l'état du serveur et de la BDD
+
+Endpoints authentifiés :
+  GET/PATCH /api/me/              → Profil de l'utilisateur connecté
+  POST /api/change-password/      → Changement de mot de passe
+
+Endpoints admin uniquement :
+  GET/POST        /api/users/     → Liste et création de comptes
+  GET/PATCH/DELETE /api/users/:id/→ Détail, modification, suppression d'un compte
+  GET /api/droits/                → Liste des permissions disponibles
+  GET /api/audit-log/             → Journal d'audit des modifications
+"""
 from django.contrib.auth import authenticate
 from django.contrib.auth.models import User
 from django.core.mail import send_mail
@@ -55,13 +74,31 @@ def _user_payload(user):
 @api_view(["POST"])
 @permission_classes([AllowAny])
 def login_view(request):
-    username = request.data.get("username")
-    password = request.data.get("password")
+    from recoltes.models import ActionLog
+    username = (request.data.get("username") or "").strip()
+    password = request.data.get("password") or ""
+
+    # Détecter les comptes désactivés avant authenticate() (ModelBackend renvoie None pour les inactifs)
+    try:
+        candidate = User.objects.get(username=username)
+        if not candidate.is_active:
+            log_action(candidate, "tentative_connexion_desactivee",
+                       detail=f"Tentative de connexion sur le compte désactivé « {username} ».")
+            return Response({"detail": "Ce compte est désactivé"}, status=403)
+    except User.DoesNotExist:
+        pass
+
     user = authenticate(username=username, password=password)
     if not user:
+        ActionLog.objects.create(
+            acteur=None,
+            action="tentative_connexion_echouee",
+            detail=f"Tentative de connexion échouée pour l'identifiant « {username} ».",
+        )
         return Response({"detail": "Identifiants invalides"}, status=400)
-    if not user.is_active:
-        return Response({"detail": "Ce compte est désactivé"}, status=403)
+
+    log_action(user, "connexion_reussie",
+               detail=f"Connexion réussie pour « {user.username} ».")
     token, _ = Token.objects.get_or_create(user=user)
     return Response({"token": token.key, "user": _user_payload(user)})
 

@@ -300,6 +300,10 @@ class ActionLog(models.Model):
         ("suppression_materiel_travaux",  "Retrait matériel dans travaux"),
         # ── Annulations admin ──────────────────────────────────────
         ("annulation_action",        "Annulation d'action superviseur"),
+        # ── Connexions ─────────────────────────────────────────────
+        ("connexion_reussie",               "Connexion réussie"),
+        ("tentative_connexion_echouee",     "Tentative de connexion échouée"),
+        ("tentative_connexion_desactivee",  "Tentative de connexion (compte désactivé)"),
     ]
 
     acteur = models.ForeignKey(

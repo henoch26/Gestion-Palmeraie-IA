@@ -1,3 +1,17 @@
+/**
+ * GestionUtilisateurs.jsx — CRUD des comptes utilisateurs (admin uniquement).
+ *
+ * Permet de creer, modifier, activer/desactiver et supprimer les superviseurs.
+ * Les droits (permissions) sont attribues par case a cocher pour chaque Droit
+ * disponible dans la base (GET /api/auth/droits/).
+ *
+ * Regles metier importantes :
+ *   - L'admin principal (is_superuser) ne peut pas etre supprime ni desactive.
+ *   - Le bouton "Modifier" est masque sur la propre ligne de l'admin connecte.
+ *   - La reinitialisation du MDP force must_change_password = true cote serveur.
+ *
+ * Acces : admin uniquement (protege via AdminRoute dans App.jsx).
+ */
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { apiDelete, apiGet, apiPatch, apiPost } from "../../api/axios.js";

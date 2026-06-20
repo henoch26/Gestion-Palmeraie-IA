@@ -38,9 +38,29 @@ export default function RecolteurDialog({ open, onClose, onSubmit, initial }) {
   const handleSubmit = (e) => {
     e.preventDefault();
     const errs = {};
-    if (!form.nom.trim())              errs.nom              = "Nom requis";
-    if (!form.lieu_residence.trim())   errs.lieu_residence   = "Lieu de résidence requis";
-    if (!form.numero_telephone.trim()) errs.numero_telephone = "Numéro de téléphone requis";
+    if (!form.nom.trim())            errs.nom            = "Nom requis";
+    if (!form.lieu_residence.trim()) errs.lieu_residence = "Lieu de résidence requis";
+
+    if (!form.numero_telephone.trim()) {
+      errs.numero_telephone = "Numéro de téléphone requis";
+    } else {
+      const digits = form.numero_telephone.replace(/\D/g, "");
+      if (digits.length < 8 || digits.length > 15) {
+        errs.numero_telephone = "Numéro invalide (8 à 15 chiffres attendus)";
+      } else if (!/^[\d\s+\-(). ]+$/.test(form.numero_telephone.trim())) {
+        errs.numero_telephone = "Caractères invalides — chiffres, espaces, +, -, () uniquement";
+      }
+    }
+
+    const today = new Date().toISOString().split("T")[0];
+    if (form.date_naissance) {
+      if (form.date_naissance > today) {
+        errs.date_naissance = "La date de naissance ne peut pas être dans le futur";
+      } else if (form.date_naissance < "1930-01-01") {
+        errs.date_naissance = "Date de naissance invalide (trop ancienne)";
+      }
+    }
+
     if (Object.keys(errs).length) { setErrors(errs); return; }
     onSubmit(form);
   };
@@ -70,7 +90,10 @@ export default function RecolteurDialog({ open, onClose, onSubmit, initial }) {
 
           <label>
             Date de naissance
-            <input type="date" name="date_naissance" value={form.date_naissance} onChange={handleChange} />
+            <input type="date" name="date_naissance" value={form.date_naissance} onChange={handleChange}
+              min="1930-01-01"
+              max={new Date().toISOString().split("T")[0]} />
+            {errors.date_naissance && <span className="field-error">{errors.date_naissance}</span>}
           </label>
 
           {/* ── Contact ── */}

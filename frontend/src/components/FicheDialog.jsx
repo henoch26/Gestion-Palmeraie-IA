@@ -1,3 +1,19 @@
+/**
+ * FicheDialog.jsx — Dialog de detail d'une fiche de recolte.
+ *
+ * Affiche le recapitulatif complet d'une fiche (secteur, regime, quantites,
+ * prix, bareme, recus de vente) et permet :
+ *   - L'impression PDF via jsPDF + jspdf-autotable
+ *   - La modification du bareme (admin)
+ *   - La validation / le rejet (admin)
+ *
+ * Props :
+ *   fiche       — Objet fiche recolte complet
+ *   onClose     — Callback de fermeture
+ *   onValider   — Callback apres validation (rafraichit la liste parente)
+ *   onRejeter   — Callback apres rejet
+ *   readOnly    — Si true, masque les boutons d'action admin
+ */
 import { jsPDF } from "jspdf";
 import autoTable from "jspdf-autotable";
 import useBodyScrollLock from "../utils/useBodyScrollLock.js";

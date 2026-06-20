@@ -1,3 +1,17 @@
+/**
+ * MonAudit.jsx — Historique des actions du superviseur connecte.
+ *
+ * Affiche uniquement les entrees ActionLog ou acteur = utilisateur courant.
+ * Le filtrage est effectue cote serveur (l'API retourne seulement les actions
+ * de l'utilisateur authentifie pour les non-admins).
+ *
+ * Differences avec JournalAudit (admin) :
+ *   - Pas de filtre par acteur (une seule personne)
+ *   - Pas de bouton "Annuler" (les annulations sont reservees a l'admin)
+ *   - N'affiche pas tentative_connexion_echouee (acteur = null, jamais inclus)
+ *
+ * Acces : tous les utilisateurs connectes (/mon-audit dans App.jsx).
+ */
 import { useEffect, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { useToast } from "../../context/ToastContext.jsx";
@@ -36,7 +50,10 @@ const ACTION_LABELS = {
   validation_travaux:       { label: "Valid. travaux",     color: "#2e7d32", bg: "#e8f5e9" },
   rejet_travaux:            { label: "Rejet travaux",      color: "#c62828", bg: "#ffebee" },
   suppression_travaux:      { label: "Suppr. travaux",     color: "#b71c1c", bg: "#ffebee" },
-  annulation_action:        { label: "Annulation",         color: "#4a148c", bg: "#f3e5f5" },
+  annulation_action:               { label: "Annulation",        color: "#4a148c", bg: "#f3e5f5" },
+  // ── Connexions ────────────────────────────────────────────────
+  connexion_reussie:               { label: "Connexion",          color: "#1b5e20", bg: "#e8f5e9" },
+  tentative_connexion_desactivee:  { label: "Compte désactivé",   color: "#e65100", bg: "#fff3e0" },
   // ── Gestion de mon compte ───────────────────────────────────────
   modification_utilisateur: { label: "Modif. compte",      color: "#37474f", bg: "#eceff1" },
 };

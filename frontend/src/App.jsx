@@ -1,3 +1,16 @@
+/**
+ * App.jsx — Point d'entree de l'application React. Definit l'arborescence des routes.
+ *
+ * Trois niveaux de protection :
+ *   ProtectedRoute   — Redirige vers /login si non authentifie
+ *   AdminRoute       — Redirige si l'utilisateur n'est pas admin
+ *   RequirePermission— Redirige si le superviseur n'a pas le droit specifie
+ *
+ * Verification de sante du serveur :
+ *   Au demarrage, un appel GET /api/health/ verifie que le backend est joignable.
+ *   Un toast persistant s'affiche si le serveur est indisponible, avec un bouton
+ *   "Reessayer". Le toast disparait automatiquement des que le serveur repond.
+ */
 import "./App.css"
 import { useCallback, useEffect, useRef } from "react";
 import { BrowserRouter,Routes,Route,Navigate } from "react-router-dom";

@@ -1,11 +1,23 @@
+/**
+ * LoginPage.jsx — Page de connexion de l'application.
+ *
+ * Cas traites :
+ *   - Identifiants invalides  → message d'erreur generique
+ *   - Compte desactive        → banniere rouge + lien "Mot de passe oublie" grise
+ *                               (le backend renvoie HTTP 403 avec detail specifique)
+ *   - must_change_password    → redirection forcee vers /changer-mot-de-passe
+ *   - Deja authentifie        → redirection vers /dashboard au chargement
+ *
+ * Note : detecter les comptes desactives necessite une verification AVANT
+ * authenticate() cote serveur (ModelBackend retourne None pour les comptes
+ * inactifs, rendant impossible la distinction compte inexistant / desactive).
+ */
 import { useEffect, useRef, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { useAuth } from "../../context/AuthContext.jsx";
 import { useToast } from "../../context/ToastContext.jsx";
 import logo from "../../assets/logo.png";
 import LogoLoader from "../../components/LogoLoader.jsx";
-
-// Page de connexion (mock)
 export default function LoginPage() {
   const { login } = useAuth();
   const { pushToast } = useToast();

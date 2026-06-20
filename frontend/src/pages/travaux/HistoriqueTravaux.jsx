@@ -1,3 +1,20 @@
+/**
+ * HistoriqueTravaux.jsx — Page de gestion des fiches de travaux.
+ *
+ * La page est organisee en 2 onglets (?tab=) :
+ *   saisie     — Formulaire de creation d'une fiche travaux avec consommables
+ *                et repartition des taches entre agents (superviseur)
+ *   historique — Tableau des fiches avec filtres ; validation/rejet (admin)
+ *
+ * Structure d'une fiche travaux :
+ *   FicheTravaux + N ConsommableTravaux + N RepartitionTache
+ *   Le cout total est recalcule cote serveur apres chaque modification
+ *   (voir recalculer_cout() dans backend/travaux/models.py).
+ *
+ * Acces :
+ *   - superviseur : cree et soumet ses propres fiches
+ *   - admin : valide, rejette ou modifie toutes les fiches
+ */
 import { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 
@@ -339,7 +356,7 @@ export default function HistoriqueTravaux() {
       const payload = buildPayload();
 
       if (!navigator.onLine) {
-        await saveTravauxOffline(payload);
+        await saveTravauxOffline(payload, getToken());
         setSuccess({ open: true, message: "Fiche sauvegardée hors ligne — sera synchronisée à la reconnexion." });
         return;
       }

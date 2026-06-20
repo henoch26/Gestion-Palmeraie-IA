@@ -1,3 +1,19 @@
+/**
+ * Sidebar.jsx — Navigation principale de l'application.
+ *
+ * Comportement :
+ *   - Reduit/developpe (collapsed) avec preference persistee dans localStorage.
+ *   - Sur mobile, s'ouvre en overlay via un bouton hamburger.
+ *   - Les sections se referment/ouvrent automatiquement selon la route active.
+ *   - L'affichage des sections est conditionne par le role et les permissions :
+ *       isAdmin         → toutes les sections visibles
+ *       hasPermission() → sections Ressources, Agents, Clients filtrees
+ *
+ * Composants internes :
+ *   SidebarSection   — Section collapsible avec bouton toggle
+ *   SidebarLink      — Lien NavLink simple (highlight sur route active)
+ *   TabLink          — Lien vers un onglet (?tab=xxx) de la meme page
+ */
 import { useEffect, useState } from "react";
 import { Link, NavLink, useLocation, useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext.jsx";

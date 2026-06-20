@@ -1,3 +1,17 @@
+/**
+ * DashboardPage.jsx — Tableau de bord principal avec 4 onglets analytiques.
+ *
+ * Onglets (?tab=) :
+ *   overview   — KPIs globaux (production, chiffre d'affaires, taux de livraison)
+ *   secteurs   — Comparatif de production par secteur avec graphiques en barres
+ *   financier  — Evolution mensuelle du CA et des couts (recoltes + travaux)
+ *   recolteurs — Classement des agents par quantite recoltee sur l'annee
+ *
+ * Donnees : GET /api/dashboard/?year=YYYY&tab=xxx
+ * L'API retourne des donnees differentes selon le tab et l'annee selectionnee.
+ *
+ * Acces : tous les utilisateurs connectes ; l'API filtre selon le role.
+ */
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import ChartCard from "../../components/ChartCard.jsx";

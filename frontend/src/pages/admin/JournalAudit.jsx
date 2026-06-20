@@ -1,3 +1,16 @@
+/**
+ * JournalAudit.jsx — Historique global de toutes les actions (admin uniquement).
+ *
+ * Affiche l'ensemble des entrees ActionLog avec filtres par type, acteur et
+ * plage de dates. Chaque ligne peut etre developpee pour voir le detail
+ * (snapshot avant/apres) et, le cas echeant, annulee (revert).
+ *
+ * Acces : admin seulement (protege via AdminRoute dans App.jsx).
+ * Donnees : GET /api/recoltes/action-logs/ (supporte ?action=, ?acteur=, ?start=, ?end=)
+ *
+ * ACTION_LABELS — dictionnaire centralise qui mappe chaque code d'action
+ * a un libelle court et des couleurs d'affichage (badge).
+ */
 import { useEffect, useState } from "react";
 import { useToast } from "../../context/ToastContext.jsx";
 import { listActionLogs } from "../../services/actionLogService.js";
@@ -40,7 +53,11 @@ const ACTION_LABELS = {
   rejet_travaux:            { label: "Rejet travaux",      color: "#c62828", bg: "#ffebee" },
   suppression_travaux:      { label: "Suppr. travaux",     color: "#b71c1c", bg: "#ffebee" },
   // ── Annulations ────────────────────────────────────────────────
-  annulation_action:        { label: "Annulation",         color: "#4a148c", bg: "#f3e5f5" },
+  annulation_action:               { label: "Annulation",              color: "#4a148c", bg: "#f3e5f5" },
+  // ── Connexions ─────────────────────────────────────────────────
+  connexion_reussie:               { label: "Connexion",               color: "#1b5e20", bg: "#e8f5e9" },
+  tentative_connexion_echouee:     { label: "Connexion échouée",       color: "#b71c1c", bg: "#ffebee" },
+  tentative_connexion_desactivee:  { label: "Compte désactivé",        color: "#e65100", bg: "#fff3e0" },
 };
 
 const fmtDate = (iso) => {
