@@ -2,7 +2,7 @@ import io
 import json
 
 from django.http import HttpResponse
-from django.db.models import Sum, Count, Max, Q
+from django.db.models import Sum, Count, Max, Q, Prefetch
 from django.db.models.functions import Coalesce
 from django.utils import timezone
 from openpyxl import Workbook
@@ -14,11 +14,12 @@ from rest_framework.response import Response
 from recolteurs.models import Personnel
 from utils.permissions import IsAdmin, has_droit
 from accounts.utils import create_notification
-from .models import ActionLog, Client, FicheRecolte, FicheRecolteDetail, FicheRecuVente, ParametreBonus
+from .models import ActionLog, Client, FicheRecolte, FicheRecolteDetail, FicheRecolteLigne, FicheRecuVente, ParametreBonus
 from .serializers import (
     ActionLogSerializer,
     ClientSerializer,
     FicheRecolteSerializer,
+    FicheRecolteListSerializer,
     FicheRecuVenteSerializer,
     ParametreBonusSerializer,
 )
@@ -210,12 +211,23 @@ def _notify_statut_recolte(instance, old_statut, new_statut, actor=None):
 class FicheRecolteViewSet(viewsets.ModelViewSet):
     serializer_class = FicheRecolteSerializer
 
+    def get_serializer_class(self):
+        if self.action == "list":
+            return FicheRecolteListSerializer
+        return FicheRecolteSerializer
+
     def get_queryset(self):
         qs = FicheRecolte.objects.select_related(
-            "superviseur_general_obj"
-        ).prefetch_related(
-            "superviseurs_adjoints", "lignes__details", "recus"
-        ).order_by("-id")
+            "superviseur_general_obj", "created_by", "validated_by"
+        )
+        if self.action == "list":
+            qs = qs.prefetch_related(
+                Prefetch("lignes", queryset=FicheRecolteLigne.objects.prefetch_related("details")),
+                "recus",
+            )
+        else:
+            qs = qs.prefetch_related("superviseurs_adjoints", "lignes__details", "recus")
+        qs = qs.order_by("-id")
         # Admin voit toutes les fiches ; superviseur uniquement les siennes
         if not _is_admin(self.request.user):
             qs = qs.filter(created_by=self.request.user)

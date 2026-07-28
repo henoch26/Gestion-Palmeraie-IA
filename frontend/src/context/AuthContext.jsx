@@ -66,6 +66,8 @@ export function AuthProvider({ children }) {
       isAdmin: role === "admin",
       isSuperviseur: role === "superviseur",
       isSuperviseurAdjoint: role === "superviseur_adjoint",
+      isEncadreurTechnique: role === "encadreur_technique",
+      isIARole: ["admin", "superviseur", "superviseur_adjoint", "encadreur_technique"].includes(role),
       // Vrai pour superviseur ET superviseur_adjoint (tous deux non-admin)
       isNonAdmin: role === "superviseur" || role === "superviseur_adjoint",
       mustChangePassword: auth.user?.must_change_password ?? false,

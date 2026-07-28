@@ -1,27 +1,30 @@
 /**
- * Service Worker — mise en cache des pages principales + stratégie réseau-d'abord.
+ * Service Worker — stratégie réseau-d'abord avec fallback cache.
+ * Inclut les routes du module IA dans le shell applicatif.
  */
-const CACHE_NAME = "palmeraie-v1";
+const CACHE_NAME = "palmeraie-v2";
 const SHELL_URLS = [
   "/",
   "/index.html",
   "/dashboard",
   "/recoltes",
   "/travaux",
-  "/personnel",
   "/secteurs",
+  "/recolteurs",
   "/materiels",
+  "/ia",
+  "/ia/predictions",
+  "/ia/anomalies",
+  "/ia/modeles",
 ];
 
-// Installation : mise en cache du shell applicatif
 self.addEventListener("install", (event) => {
   event.waitUntil(
-    caches.open(CACHE_NAME).then((cache) => cache.addAll(SHELL_URLS))
+    caches.open(CACHE_NAME).then((cache) => cache.addAll(SHELL_URLS).catch(() => {}))
   );
   self.skipWaiting();
 });
 
-// Activation : purge des anciens caches
 self.addEventListener("activate", (event) => {
   event.waitUntil(
     caches.keys().then((keys) =>
@@ -31,17 +34,19 @@ self.addEventListener("activate", (event) => {
   self.clients.claim();
 });
 
-// Fetch : réseau d'abord, cache en repli pour les navigations
 self.addEventListener("fetch", (event) => {
   const { request } = event;
 
-  // On ne met PAS en cache les requêtes API (elles passent toujours par le réseau)
+  // Requêtes API : réseau uniquement (pas de cache)
   if (request.url.includes("/api/")) {
-    event.respondWith(fetch(request));
+    event.respondWith(fetch(request).catch(() => new Response(
+      JSON.stringify({ detail: "Hors ligne — données indisponibles." }),
+      { status: 503, headers: { "Content-Type": "application/json" } }
+    )));
     return;
   }
 
-  // Pour les navigations (HTML) : réseau d'abord, sinon index.html en cache
+  // Navigation (HTML) : réseau d'abord, sinon index.html en cache
   if (request.mode === "navigate") {
     event.respondWith(
       fetch(request).catch(() =>
@@ -51,8 +56,15 @@ self.addEventListener("fetch", (event) => {
     return;
   }
 
-  // Assets statiques : cache d'abord, réseau en repli
+  // Assets statiques : cache-first
   event.respondWith(
-    caches.match(request).then((cached) => cached || fetch(request))
+    caches.match(request).then((cached) => cached || fetch(request).then((res) => {
+      // Mettre en cache les nouvelles ressources statiques
+      if (res.ok && (request.url.endsWith(".js") || request.url.endsWith(".css"))) {
+        const clone = res.clone();
+        caches.open(CACHE_NAME).then((c) => c.put(request, clone));
+      }
+      return res;
+    }))
   );
 });

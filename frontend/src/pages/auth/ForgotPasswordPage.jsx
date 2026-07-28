@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
+import { Mail } from "lucide-react";
 import { forgotPassword } from "../../services/authService.js";
 import logo from "../../assets/logo.png";
 
@@ -40,7 +41,7 @@ export default function ForgotPasswordPage() {
         <div className="login-body">
           {sent ? (
             <div style={{ textAlign: "center" }}>
-              <div style={{ fontSize: 48, marginBottom: 12 }}>✉️</div>
+              <div style={{ display: "flex", justifyContent: "center", marginBottom: 12 }}><Mail size={48} color="#1565c0" /></div>
               <h2 className="login-title" style={{ marginBottom: 8 }}>Email envoyé</h2>
               <p style={{ color: "#555", fontSize: 14, lineHeight: 1.6, marginBottom: 24 }}>
                 Si un compte correspond à cet identifiant, un email contenant un lien de

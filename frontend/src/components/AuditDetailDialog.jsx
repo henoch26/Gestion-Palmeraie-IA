@@ -1,3 +1,5 @@
+import { AlertTriangle, X } from "lucide-react";
+
 export default function AuditDetailDialog({ row, onClose }) {
   if (!row) return null;
 
@@ -34,8 +36,9 @@ export default function AuditDetailDialog({ row, onClose }) {
               background: "rgba(255,255,255,0.15)", border: "none",
               borderRadius: 6, color: "#fff", padding: "4px 10px",
               cursor: "pointer", fontSize: 12, fontWeight: 600,
+              display: "flex", alignItems: "center",
             }}
-          >✕</button>
+          ><X size={14} /></button>
         </div>
 
         {/* Métadonnées */}
@@ -58,7 +61,7 @@ export default function AuditDetailDialog({ row, onClose }) {
             background: "#fff8e1", borderBottom: "1px solid #ffe082",
             display: "flex", alignItems: "flex-start", gap: 10,
           }}>
-            <span style={{ fontSize: 16 }}>⚠️</span>
+            <AlertTriangle size={16} color="#e65100" style={{ flexShrink: 0 }} />
             <div>
               <p style={{ margin: 0, fontWeight: 700, fontSize: 12, color: "#e65100", textTransform: "uppercase", letterSpacing: 0.5 }}>
                 Motif du rejet

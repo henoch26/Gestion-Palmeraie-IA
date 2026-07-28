@@ -476,8 +476,15 @@ def superviseurs_list(request):
 @api_view(["GET"])
 @permission_classes([IsAuthenticated, IsAdmin])
 def audit_log_list(request):
-    table = request.query_params.get("table")
+    import io
+    from openpyxl import Workbook
+    from openpyxl.styles import Font, PatternFill, Alignment
+    from django.http import HttpResponse
+
+    table     = request.query_params.get("table")
     record_id = request.query_params.get("id")
+    export    = request.query_params.get("export")
+
     qs = AuditLog.objects.select_related("utilisateur").order_by("-date_modification")
     if table:
         qs = qs.filter(table_concernee=table)
@@ -486,5 +493,37 @@ def audit_log_list(request):
             qs = qs.filter(id_enregistrement=int(record_id))
         except ValueError:
             pass
+
+    if export == "excel":
+        wb = Workbook()
+        ws = wb.active
+        ws.title = "Journal d'audit"
+        headers = ["Date", "Utilisateur", "Table", "ID", "Champ", "Ancienne valeur", "Nouvelle valeur", "Motif"]
+        fill = PatternFill(fill_type="solid", fgColor="1F4E79")
+        font = Font(bold=True, color="FFFFFF")
+        for i, h in enumerate(headers, 1):
+            c = ws.cell(row=1, column=i, value=h)
+            c.font = font; c.fill = fill; c.alignment = Alignment(horizontal="center")
+        ws.auto_filter.ref = ws.dimensions
+
+        for log in qs[:5000]:
+            username = log.utilisateur.username if log.utilisateur else "—"
+            ws.append([
+                log.date_modification.strftime("%Y-%m-%d %H:%M") if log.date_modification else "",
+                username,
+                log.table_concernee,
+                log.id_enregistrement or "",
+                log.champ_modifie,
+                log.ancienne_valeur,
+                log.nouvelle_valeur,
+                log.motif,
+            ])
+
+        buf = io.BytesIO()
+        wb.save(buf); buf.seek(0)
+        resp = HttpResponse(buf.read(), content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+        resp["Content-Disposition"] = 'attachment; filename="journal_audit.xlsx"'
+        return resp
+
     data = AuditLogSerializer(qs[:200], many=True).data
     return Response({"results": data, "count": qs.count()})

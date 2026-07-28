@@ -112,7 +112,8 @@ export default function DetailSecteur() {
 
   const years = useMemo(() => {
     const y = new Date().getFullYear();
-    return Array.from({ length: 10 }, (_, i) => y - i);
+    const DATA_START_YEAR = 2014; // premiere annee couverte par l'historique de la palmeraie
+    return Array.from({ length: y - DATA_START_YEAR + 1 }, (_, i) => y - i);
   }, []);
 
   const load = async () => {

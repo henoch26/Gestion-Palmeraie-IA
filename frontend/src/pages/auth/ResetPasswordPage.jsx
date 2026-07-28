@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
+import { CheckCircle2 } from "lucide-react";
 import { resetPassword } from "../../services/authService.js";
 import logo from "../../assets/logo.png";
 
@@ -55,7 +56,7 @@ export default function ResetPasswordPage() {
             </div>
           ) : done ? (
             <div style={{ textAlign: "center" }}>
-              <div style={{ fontSize: 48, marginBottom: 12 }}>✅</div>
+              <div style={{ display: "flex", justifyContent: "center", marginBottom: 12 }}><CheckCircle2 size={48} color="#2e7d32" /></div>
               <h2 className="login-title" style={{ marginBottom: 8 }}>Mot de passe modifié</h2>
               <p style={{ color: "#555", fontSize: 14, marginBottom: 24 }}>
                 Votre mot de passe a été réinitialisé avec succès. Vous pouvez vous connecter.

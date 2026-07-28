@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useNavigate } from "react-router-dom";
+import { Bell } from "lucide-react";
 import { getNotifications, markAllRead, markRead } from "../services/notificationService.js";
 
 const POLL_INTERVAL = 30_000;
@@ -133,7 +134,7 @@ export default function NotificationBell() {
   return (
     <div className="notif-bell-wrap" ref={bellRef}>
       <button className="notif-bell-btn" onClick={handleOpen} aria-label="Notifications">
-        <span className="notif-bell-icon">&#128276;</span>
+        <span className="notif-bell-icon"><Bell size={18} /></span>
         {unread > 0 && (
           <span className="notif-badge">{unread > 99 ? "99+" : unread}</span>
         )}

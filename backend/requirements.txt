@@ -5,8 +5,13 @@ psycopg2-binary==2.9.11
 sqlparse==0.5.5
 tzdata==2025.3
 django-cors-headers==4.4.0
-Pillow==12.2.0
 openpyxl==3.1.5
 django-crontab==0.7.1
 gunicorn==21.2.0
 python-dotenv==1.2.2
+# Module IA — Machine Learning
+scikit-learn==1.5.2
+numpy==1.26.4
+joblib==1.4.2
+# Documentation API
+drf-spectacular==0.27.2

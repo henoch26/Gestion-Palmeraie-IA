@@ -356,6 +356,64 @@ class FicheRecolteSerializer(serializers.ModelSerializer):
         return instance
 
 
+class FicheRecolteListSerializer(FicheRecolteSerializer):
+    """Serializer allege pour l'action `list` de FicheRecolteViewSet.
+
+    Omet lignes (qui imbrique details, 2 niveaux) et recus — les deux
+    collections les plus couteuses a serialiser — ainsi que
+    superviseurs_adjoints, superviseur_general_display et
+    superviseur_general_telephone (ce dernier fait un fallback query par
+    fiche quand superviseur_general_obj est vide). Expose a la place 4
+    agregats legers (total_regimes, total_prix, nb_recolteurs, nb_recus)
+    calcules en Python sur les objets deja prefetches, sans jamais
+    instancier FicheRecolteLigneSerializer/FicheRecuVenteSerializer par
+    ligne. Le detail complet reste disponible via GET /recoltes/:id/
+    (FicheRecolteSerializer, action retrieve).
+    """
+
+    total_regimes = serializers.SerializerMethodField()
+    total_prix = serializers.SerializerMethodField()
+    nb_recolteurs = serializers.SerializerMethodField()
+    nb_recus = serializers.SerializerMethodField()
+
+    class Meta(FicheRecolteSerializer.Meta):
+        fields = [
+            "id", "date", "superviseur_general", "superviseur_general_obj",
+            "bareme_grands", "bareme_moyens", "bareme_petits",
+            "depense_nourriture", "depense_transport", "depense_salaire",
+            "depense_total", "observations", "statut", "statut_display",
+            "created_by", "created_by_username", "created_at",
+            "validated_by", "validated_by_display", "validated_at",
+            "total_regimes", "total_prix", "nb_recolteurs", "nb_recus",
+        ]
+
+    def get_total_regimes(self, obj):
+        return sum(
+            int(d.quantite or 0)
+            for ligne in obj.lignes.all()
+            for d in ligne.details.all()
+        )
+
+    def get_total_prix(self, obj):
+        rates = {
+            "grands": int(obj.bareme_grands or 0),
+            "moyens": int(obj.bareme_moyens or 0),
+            "petits": int(obj.bareme_petits or 0),
+        }
+        total = 0
+        for ligne in obj.lignes.all():
+            qty = sum(int(d.quantite or 0) for d in ligne.details.all())
+            total += qty * int(rates.get(ligne.regime_type, 0) or 0)
+        return total
+
+    def get_nb_recolteurs(self, obj):
+        noms = {(ligne.recolteur_nom or "Sans nom") for ligne in obj.lignes.all()}
+        return len(noms)
+
+    def get_nb_recus(self, obj):
+        return len(obj.recus.all())
+
+
 class ActionLogSerializer(serializers.ModelSerializer):
     acteur_display      = serializers.SerializerMethodField()
     superviseur_display = serializers.SerializerMethodField()

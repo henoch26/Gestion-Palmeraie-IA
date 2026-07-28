@@ -1,15 +1,12 @@
 import re
-
 from django.db import models
 from django.utils.text import slugify
-
 
 class Secteur(models.Model):
     STATUT_CHOICES = [
         ("actif", "Actif"),
         ("inactif", "Inactif"),
     ]
-
     code = models.CharField(max_length=20, unique=True)
     nom = models.CharField(max_length=120)
     superficie_ha = models.DecimalField(max_digits=8, decimal_places=2)

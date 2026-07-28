@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { Calendar, Package, CalendarDays, TrendingUp } from "lucide-react";
 
 const JOURS = ["Lun", "Mar", "Mer", "Jeu", "Ven", "Sam", "Dim"];
 const MOIS_COURTS = ["Jan","Fév","Mar","Avr","Mai","Juin","Juil","Aoû","Sep","Oct","Nov","Déc"];
@@ -146,10 +147,10 @@ export default function ProductionHeatmap({ data, year, onDayClick }) {
         className="heatmap-summary"
         style={{ display:"flex", flexWrap:"wrap", gap:20, fontSize:13, color:"#555", marginBottom:14 }}
       >
-        <span>📅 <strong>{year}</strong></span>
-        <span>📦 Total : <strong style={{ color:"#2e7d32" }}>{totalProd.toLocaleString("fr-FR")} régimes</strong></span>
-        <span>🗓️ Jours actifs : <strong>{activeDays}</strong></span>
-        <span>📈 Pic : <strong>{maxVal.toLocaleString("fr-FR")} régimes</strong></span>
+        <span style={{ display: "inline-flex", alignItems: "center", gap: 5 }}><Calendar size={14} /> <strong>{year}</strong></span>
+        <span style={{ display: "inline-flex", alignItems: "center", gap: 5 }}><Package size={14} /> Total : <strong style={{ color:"#2e7d32" }}>{totalProd.toLocaleString("fr-FR")} régimes</strong></span>
+        <span style={{ display: "inline-flex", alignItems: "center", gap: 5 }}><CalendarDays size={14} /> Jours actifs : <strong>{activeDays}</strong></span>
+        <span style={{ display: "inline-flex", alignItems: "center", gap: 5 }}><TrendingUp size={14} /> Pic : <strong>{maxVal.toLocaleString("fr-FR")} régimes</strong></span>
       </div>
 
       <svg width={svgWidth} height={svgHeight} style={{ display:"block", overflow:"visible" }}>

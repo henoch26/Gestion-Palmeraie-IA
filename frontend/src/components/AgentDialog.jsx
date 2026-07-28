@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { Pencil, User, X } from "lucide-react";
 import useBodyScrollLock from "../utils/useBodyScrollLock.js";
 
 const EMPTY = { nom: "", prenom: "", telephone: "", secteur: "", actif: true };
@@ -67,7 +68,7 @@ export default function AgentDialog({ open, onClose, onSubmit, initial, secteurs
               display: "flex", alignItems: "center", justifyContent: "center",
               fontSize: 20, flexShrink: 0,
             }}>
-              {isEdit ? "✏️" : "👤"}
+              {isEdit ? <Pencil size={20} /> : <User size={20} />}
             </div>
             <div>
               <div style={{ fontWeight: 700, fontSize: 15 }}>
@@ -87,9 +88,10 @@ export default function AgentDialog({ open, onClose, onSubmit, initial, secteurs
               background: "rgba(255,255,255,0.2)", border: "none",
               borderRadius: 6, color: "#fff", padding: "4px 10px",
               cursor: "pointer", fontSize: 12, fontWeight: 600,
+              display: "flex", alignItems: "center",
             }}
           >
-            ✕
+            <X size={14} />
           </button>
         </div>
 

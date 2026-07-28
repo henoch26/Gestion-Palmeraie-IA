@@ -149,7 +149,8 @@ export default function DetailSuperviseur() {
 
   const years = useMemo(() => {
     const y = new Date().getFullYear();
-    return Array.from({ length: 6 }, (_, i) => y - i);
+    const DATA_START_YEAR = 2014; // premiere annee couverte par l'historique de la palmeraie
+    return Array.from({ length: y - DATA_START_YEAR + 1 }, (_, i) => y - i);
   }, []);
 
   const barRef        = useRef(null);
@@ -311,6 +312,10 @@ export default function DetailSuperviseur() {
       {/* ════════════ ONGLET VUE GLOBALE ════════════ */}
       {tab === "global" && (
         <>
+          <p style={{ margin: "0 0 14px", fontSize: 12, color: "#6b7280", fontStyle: "italic" }}>
+            Toutes periodes confondues (depuis 2014) — pour filtrer par annee, consultez les onglets
+            "Ses secteurs" et "Ses recolteurs".
+          </p>
           <div className="stats-grid" style={{ gridTemplateColumns: "repeat(3, 1fr)", marginBottom: 28 }}>
             {kpiCards.map(({ label, value, color }) => (
               <div key={label} className="stat-card">

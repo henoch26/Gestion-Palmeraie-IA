@@ -16,6 +16,7 @@
  */
 import { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
+import { X, Phone, Pencil } from "lucide-react";
 import {
   ficheRecolteInitial,
   regimeTypes,
@@ -23,7 +24,7 @@ import {
 } from "../../data/ficheRecolteData.js";
 import { useToast } from "../../context/ToastContext.jsx";
 import { listSecteurs } from "../../services/secteurService.js";
-import { createFiche, deleteFiche, getRecoltesAnalytics, listFiches, patchFiche, updateFiche } from "../../services/recolteService.js";
+import { createFiche, deleteFiche, getFiche, getRecoltesAnalytics, listFiches, patchFiche, updateFiche } from "../../services/recolteService.js";
 import { createRecuVente, deleteRecuVente, getParametreBonus, listRecusVente, rejeterRecu, updateRecuVente, validerRecu } from "../../services/recuVenteService.js";
 import { useRecoltes } from "../../context/RecoltesContext.jsx";
 import { useAuth } from "../../context/AuthContext.jsx";
@@ -46,6 +47,8 @@ import useBodyScrollLock from "../../utils/useBodyScrollLock.js";
 import { sanitizeDecimal } from "../../utils/number.js";
 
 const API_BASE = import.meta.env.VITE_API_URL || "http://127.0.0.1:8000/api";
+
+const REGIME_LABEL_FULL = { grands: "Grands", moyens: "Moyens", petits: "Petits" };
 
 // ── Dialog création / modification d'un recu de vente ────────────────────────
 const VENTE_EMPTY = {
@@ -219,7 +222,7 @@ function VenteDialog({ open, row, isAdmin, prixOfficielGlobal, historyRows, clie
               </>
             ) : "Rattacher a une fiche de recolte"}
           </div>
-          <button onClick={onClose} style={{ position: "absolute", top: 12, right: 12, background: "rgba(255,255,255,0.2)", border: "none", borderRadius: 6, color: "#fff", padding: "4px 10px", cursor: "pointer", fontSize: 12, fontWeight: 600 }}>✕</button>
+          <button onClick={onClose} style={{ position: "absolute", top: 12, right: 12, background: "rgba(255,255,255,0.2)", border: "none", borderRadius: 6, color: "#fff", padding: "4px 10px", cursor: "pointer", display: "flex", alignItems: "center" }}><X size={14} /></button>
         </div>
 
         {isAdmin && row && (
@@ -260,8 +263,8 @@ function VenteDialog({ open, row, isAdmin, prixOfficielGlobal, historyRows, clie
                   <div style={{ background: "#e3f2fd", border: "1px solid #90caf9", borderRadius: 6, padding: "8px 12px", marginBottom: 12, fontSize: 13, color: "#1565c0", display: "flex", alignItems: "center", flexWrap: "wrap", gap: 8 }}>
                     <strong>Superviseur :</strong> {row.fiche_superviseur}
                     {row.fiche_superviseur_telephone && (
-                      <span style={{ fontSize: 12, fontWeight: 700, background: "#e3f2fd", color: "#1565c0", padding: "2px 8px", borderRadius: 10, border: "1px solid #90caf9" }}>
-                        📞 {row.fiche_superviseur_telephone}
+                      <span style={{ fontSize: 12, fontWeight: 700, background: "#e3f2fd", color: "#1565c0", padding: "2px 8px", borderRadius: 10, border: "1px solid #90caf9", display: "inline-flex", alignItems: "center", gap: 4 }}>
+                        <Phone size={12} /> {row.fiche_superviseur_telephone}
                       </span>
                     )}
                   </div>
@@ -434,6 +437,11 @@ export default function HistoriqueRecoltes() {
   const [saving, setSaving] = useState(false);
   const [fieldErrors, setFieldErrors] = useState({});
 
+  // Formulaire d'insertion (une ligne = un recolteur + un type de regime + quantites par secteur)
+  const [draft, setDraft] = useState({ nom: "", regimeKey: regimeTypes[0].key, secteurs: {} });
+  const [editingLigneId, setEditingLigneId] = useState(null);
+  const [draftErrors, setDraftErrors] = useState({});
+
   // Secteurs visibles dans la fiche (depuis l'API)
   const [secteurList, setSecteurList] = useState(secteurCodes);
   const [activeSecteurCodes, setActiveSecteurCodes] = useState(
@@ -473,7 +481,7 @@ export default function HistoriqueRecoltes() {
   const [venteToReject, setVenteToReject] = useState({ open: false, row: null, motif: "" });
   const [ficheToDelete, setFicheToDelete] = useState(null);
   const [venteSearch, setVenteSearch] = useState("");
-  const ventesYears = Array.from({ length: 5 }, (_, i) => currentYear - i);
+  const ventesYears = Array.from({ length: currentYear - 2014 + 1 }, (_, i) => currentYear - i);
 
   const loadVentes = async (year) => {
     setLoadingVentes(true);
@@ -557,30 +565,27 @@ export default function HistoriqueRecoltes() {
   };
 
   // Reconstruit l'état du formulaire depuis une fiche API (pour l'édition)
+  // Chaque ligne API (recolteur + type de regime) devient directement une entree.
   const ficheToFormState = (apiFiche, sectorList) => {
     const codes = sectorList.map((s) => s.code);
     let ctr = 0;
     const uid = () => `${Date.now()}-${++ctr}`;
     const emptySec = () => Object.fromEntries(codes.map((c) => [c, ""]));
 
-    const recMap = new Map();
-    for (const ligne of apiFiche.lignes || []) {
-      const nom = ligne.recolteur_nom_display || ligne.recolteur_nom || "";
-      if (!recMap.has(nom)) {
-        recMap.set(nom, {
-          id: `REC-${uid()}`,
-          nom,
-          regimes: { grands: emptySec(), moyens: emptySec(), petits: emptySec() },
-        });
-      }
-      const rec = recMap.get(nom);
-      const rk = ligne.regime_type;
+    const recolteurs = (apiFiche.lignes || []).map((ligne) => {
+      const secteurs = emptySec();
       for (const det of ligne.details || []) {
-        if (det.secteur_code && rec.regimes[rk] !== undefined) {
-          rec.regimes[rk][det.secteur_code] = det.quantite ?? "";
+        if (det.secteur_code && secteurs[det.secteur_code] !== undefined) {
+          secteurs[det.secteur_code] = det.quantite ?? "";
         }
       }
-    }
+      return {
+        id: `REC-${uid()}`,
+        nom: ligne.recolteur_nom_display || ligne.recolteur_nom || "",
+        regimeKey: ligne.regime_type,
+        secteurs,
+      };
+    });
 
     return {
       date: apiFiche.date || "",
@@ -603,15 +608,32 @@ export default function HistoriqueRecoltes() {
         secteur: s.secteur_ou_recolteur || "",
         agentId: s.agent || null,
       })),
-      recolteurs: Array.from(recMap.values()),
+      recolteurs,
     };
   };
 
-  const handleEditFiche = (row) => {
-    const formState = ficheToFormState(row, secteurList);
+  const handleVoirFiche = async (row) => {
+    try {
+      const full = await getFiche(row.id);
+      setSelectedFiche(full);
+    } catch (err) {
+      pushToast({ type: "error", title: "Fiche", message: err.message });
+    }
+  };
+
+  const handleEditFiche = async (row) => {
+    let full;
+    try {
+      full = await getFiche(row.id);
+    } catch (err) {
+      pushToast({ type: "error", title: "Fiche", message: err.message });
+      return;
+    }
+    const formState = ficheToFormState(full, secteurList);
     setFiche(formState);
-    setEditingFicheId(row.id);
+    setEditingFicheId(full.id);
     setFieldErrors({});
+    resetDraft();
     setTab("saisie");
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
@@ -664,19 +686,17 @@ export default function HistoriqueRecoltes() {
     });
   };
 
-  // Helper: cree un recolteur vide avec les colonnes secteurs
-  const createEmptyRecolteur = (list = secteurList) => {
-    const emptyBySecteur = () =>
-      Object.fromEntries(list.map((s) => [s.code, ""]));
-    return {
-      id: `REC-${Date.now()}`,
-      nom: "",
-      regimes: {
-        grands: emptyBySecteur(),
-        moyens: emptyBySecteur(),
-        petits: emptyBySecteur(),
-      },
-    };
+  // Helper: cree un brouillon d'insertion vide avec les colonnes secteurs
+  const createEmptyDraft = (list = secteurList) => ({
+    nom: "",
+    regimeKey: regimeTypes[0].key,
+    secteurs: Object.fromEntries(list.map((s) => [s.code, ""])),
+  });
+
+  const resetDraft = () => {
+    setDraft(createEmptyDraft());
+    setEditingLigneId(null);
+    setDraftErrors({});
   };
 
   const visibleSecteurs = useMemo(() => {
@@ -716,16 +736,12 @@ export default function HistoriqueRecoltes() {
       0
     );
 
-  // Salaire total auto-calculé = somme(régimes × barème) pour chaque récolteur
+  // Salaire total auto-calculé = somme(régimes × barème) pour chaque ligne inserée
   const salaireTotalCalcule = useMemo(() => {
-    const bg = Number(fiche.bareme.grands) || 0;
-    const bm = Number(fiche.bareme.moyens) || 0;
-    const bp = Number(fiche.bareme.petits) || 0;
-    return (fiche.recolteurs || []).reduce((total, rec) => {
-      const g = calcTotal(rec.regimes?.grands || {});
-      const m = calcTotal(rec.regimes?.moyens || {});
-      const p = calcTotal(rec.regimes?.petits || {});
-      return total + g * bg + m * bm + p * bp;
+    return (fiche.recolteurs || []).reduce((total, entry) => {
+      const qte = calcTotal(entry.secteurs || {});
+      const bareme = Number(fiche.bareme[entry.regimeKey]) || 0;
+      return total + qte * bareme;
     }, 0);
   }, [fiche.recolteurs, fiche.bareme, secteurList]);
 
@@ -738,7 +754,8 @@ export default function HistoriqueRecoltes() {
 
   const analyticsYears = useMemo(() => {
     const y = new Date().getFullYear();
-    return Array.from({ length: 10 }, (_, i) => y - i);
+    const DATA_START_YEAR = 2014; // premiere annee couverte par l'historique de la palmeraie
+    return Array.from({ length: y - DATA_START_YEAR + 1 }, (_, i) => y - i);
   }, []);
 
   // Chargement des secteurs depuis l'API
@@ -876,25 +893,18 @@ export default function HistoriqueRecoltes() {
     setActiveChart(null);
   }, [tab]);
 
-  // Synchronise les colonnes des regimes si la liste des secteurs change
+  // Synchronise les colonnes des secteurs (lignes deja inserees + brouillon en cours)
+  // si la liste des secteurs change
   useEffect(() => {
-    setFiche((prev) => {
-      const codes = secteurList.map((s) => s.code);
-      const sync = (regimes) =>
-        Object.fromEntries(codes.map((c) => [c, regimes[c] ?? ""]));
+    const codes = secteurList.map((s) => s.code);
+    const sync = (secteurs) =>
+      Object.fromEntries(codes.map((c) => [c, secteurs?.[c] ?? ""]));
 
-      return {
-        ...prev,
-        recolteurs: prev.recolteurs.map((r) => ({
-          ...r,
-          regimes: {
-            grands: sync(r.regimes.grands),
-            moyens: sync(r.regimes.moyens),
-            petits: sync(r.regimes.petits),
-          },
-        })),
-      };
-    });
+    setFiche((prev) => ({
+      ...prev,
+      recolteurs: prev.recolteurs.map((r) => ({ ...r, secteurs: sync(r.secteurs) })),
+    }));
+    setDraft((prev) => ({ ...prev, secteurs: sync(prev.secteurs) }));
   }, [secteurList]);
 
   // Mise a jour des champs simples (date, superviseur)
@@ -955,51 +965,69 @@ export default function HistoriqueRecoltes() {
     clearIdError("adjoints", id);
   };
 
-  // Recolteurs (nom)
-  const handleRecolteurName = (id, value) => {
-    setFiche((prev) => ({
-      ...prev,
-      recolteurs: prev.recolteurs.map((r) =>
-        r.id === id ? { ...r, nom: value } : r
-      ),
-    }));
-    clearIdError("recolteurs", id);
+  // ── Formulaire d'insertion d'une ligne (recolteur + regime + quantites) ──
+  const handleDraftNom = (value) => {
+    setDraft((prev) => ({ ...prev, nom: value }));
+    setDraftErrors((prev) => ({ ...prev, nom: undefined }));
   };
 
-  const addRecolteur = () => {
-    setFiche((prev) => ({
-      ...prev,
-      recolteurs: [...prev.recolteurs, createEmptyRecolteur()],
-    }));
+  const handleDraftRegime = (value) => {
+    setDraft((prev) => ({ ...prev, regimeKey: value }));
   };
 
-  const removeRecolteur = (id) => {
+  const handleDraftSecteurQty = (secteurCode, value) => {
+    setDraft((prev) => ({
+      ...prev,
+      secteurs: { ...prev.secteurs, [secteurCode]: Math.max(0, Number(value)) || "" },
+    }));
+    setDraftErrors((prev) => ({ ...prev, secteurs: undefined }));
+  };
+
+  // Charge une ligne deja inseree dans le formulaire pour modification
+  const startEditLigne = (entry) => {
+    setDraft({
+      nom: entry.nom,
+      regimeKey: entry.regimeKey,
+      secteurs: { ...createEmptyDraft().secteurs, ...entry.secteurs },
+    });
+    setEditingLigneId(entry.id);
+    setDraftErrors({});
+  };
+
+  const cancelEditLigne = () => resetDraft();
+
+  // Insere une nouvelle ligne ou met a jour la ligne en cours d'edition
+  const insertOrUpdateLigne = () => {
+    const nom = String(draft.nom || "").trim();
+    const hasQty = secteurList.some((s) => Number(draft.secteurs[s.code]) > 0);
+
+    const errors = {};
+    if (!nom) errors.nom = "Recolteur requis";
+    if (!hasQty) errors.secteurs = "Saisis au moins une quantite > 0";
+    if (Object.keys(errors).length > 0) {
+      setDraftErrors(errors);
+      return;
+    }
+
+    setFiche((prev) => {
+      const entry = { id: editingLigneId || `REC-${Date.now()}`, nom, regimeKey: draft.regimeKey, secteurs: draft.secteurs };
+      const recolteurs = editingLigneId
+        ? prev.recolteurs.map((r) => (r.id === editingLigneId ? entry : r))
+        : [...prev.recolteurs, entry];
+      return { ...prev, recolteurs };
+    });
+    clearSimpleError("denombrement");
+    if (editingLigneId) clearIdError("recolteurs", editingLigneId);
+    resetDraft();
+  };
+
+  const removeLigne = (id) => {
     setFiche((prev) => ({
       ...prev,
       recolteurs: prev.recolteurs.filter((r) => r.id !== id),
     }));
     clearIdError("recolteurs", id);
-  };
-
-  // Mise a jour des regimes (cellules du grand tableau)
-  const handleRegimeChange = (recolteurId, regimeKey, secteurKey, value) => {
-    setFiche((prev) => ({
-      ...prev,
-      recolteurs: prev.recolteurs.map((r) => {
-        if (r.id !== recolteurId) return r;
-        return {
-          ...r,
-          regimes: {
-            ...r.regimes,
-            [regimeKey]: {
-              ...r.regimes[regimeKey],
-              [secteurKey]: value,
-            },
-          },
-        };
-      }),
-    }));
-    clearSimpleError("denombrement");
+    if (editingLigneId === id) resetDraft();
   };
 
   // Depenses (sanitize: chiffres et point decimal uniquement, pas de negatif)
@@ -1059,61 +1087,49 @@ export default function HistoriqueRecoltes() {
     }
     if (Object.keys(adjointsErrors).length > 0) errors.adjoints = adjointsErrors;
 
-    // Lignes par recolteur et par type de regime (quantite > 0)
+    // Lignes deja inserees (recolteur + type de regime + quantites par secteur)
     const lignes = [];
     const recolteursErrors = {};
     let hasAnyQtyOverall = false;
 
-    for (const r of fiche.recolteurs || []) {
-      const nom = String(r.nom || "").trim();
+    for (const entry of fiche.recolteurs || []) {
+      const nom = String(entry.nom || "").trim();
 
-      let rowHasQty = false;
-      for (const reg of regimeTypes) {
-        for (const s of secteurList) {
-          const q = Number(r.regimes?.[reg.key]?.[s.code]) || 0;
-          if (q > 0) {
-            rowHasQty = true;
-            hasAnyQtyOverall = true;
-            break;
-          }
+      const details = [];
+      for (const s of secteurList) {
+        const q = Number(entry.secteurs?.[s.code]) || 0;
+        if (q > 0) {
+          details.push({
+            secteur: secteurByCode.get(s.code)?.id || null,
+            secteur_code: s.code,
+            quantite: q,
+          });
         }
-        if (rowHasQty) break;
       }
+      const rowHasQty = details.length > 0;
 
       // Ligne totalement vide => ignoree
       if (!nom && !rowHasQty) continue;
 
       if (!nom && rowHasQty) {
-        recolteursErrors[r.id] = "Nom requis";
+        recolteursErrors[entry.id] = "Nom requis";
         continue;
       }
+      if (!rowHasQty) continue;
 
+      hasAnyQtyOverall = true;
       const recolteurId = recolteurByName.get(nom.toLowerCase())?.id || null;
 
-      for (const reg of regimeTypes) {
-        const details = [];
-        for (const s of secteurList) {
-          const q = Number(r.regimes?.[reg.key]?.[s.code]) || 0;
-          if (q > 0) {
-            details.push({
-              secteur: secteurByCode.get(s.code)?.id || null,
-              secteur_code: s.code,
-              quantite: q,
-            });
-          }
-        }
-        if (details.length === 0) continue;
-        lignes.push({
-          recolteur: recolteurId,
-          recolteur_nom: nom,
-          regime_type: reg.key,
-          details,
-        });
-      }
+      lignes.push({
+        recolteur: recolteurId,
+        recolteur_nom: nom,
+        regime_type: entry.regimeKey,
+        details,
+      });
     }
 
     if (!hasAnyQtyOverall) {
-      errors.denombrement = "Saisis au moins une quantite > 0";
+      errors.denombrement = "Insere au moins un recolteur avec une quantite > 0";
     }
     if (Object.keys(recolteursErrors).length > 0) errors.recolteurs = recolteursErrors;
 
@@ -1186,6 +1202,7 @@ export default function HistoriqueRecoltes() {
     });
     setFieldErrors({});
     setEditingFicheId(null);
+    resetDraft();
   };
 
   // Chargement de l'historique des fiches
@@ -1279,37 +1296,18 @@ export default function HistoriqueRecoltes() {
     }
   };
 
-  // Construction des lignes pour le tableau historique
+  // Construction des lignes pour le tableau historique — les agregats
+  // (total_regimes/total_prix/nb_recolteurs/nb_recus) sont desormais calcules
+  // cote serveur par FicheRecolteListSerializer (la liste ne renvoie plus
+  // lignes/recus imbriques, trop couteux a serialiser pour tout l'historique).
   const historyRows = useMemo(() => {
-    return (history || []).map((ficheItem) => {
-      const lignes = ficheItem.lignes || [];
-      const totalRegimes = lignes.reduce(
-        (sum, line) =>
-          sum +
-          (line.details || []).reduce(
-            (s, d) => s + (Number(d.quantite) || 0),
-            0
-          ),
-        0
-      );
-      const totalPrix = lignes.reduce(
-        (sum, line) => sum + (Number(line.prix_fcfa) || 0),
-        0
-      );
-      const recolteursSet = new Set(
-        lignes.map(
-          (l) => l.recolteur_nom_display || l.recolteur_nom || "Sans nom"
-        )
-      );
-
-      return {
-        ...ficheItem,
-        total_regimes: totalRegimes,
-        total_prix: totalPrix,
-        nb_recolteurs: recolteursSet.size,
-        nb_recus: (ficheItem.recus || []).length,
-      };
-    });
+    return (history || []).map((ficheItem) => ({
+      ...ficheItem,
+      total_regimes: ficheItem.total_regimes ?? 0,
+      total_prix: ficheItem.total_prix ?? 0,
+      nb_recolteurs: ficheItem.nb_recolteurs ?? 0,
+      nb_recus: ficheItem.nb_recus ?? 0,
+    }));
   }, [history]);
 
   const fmtDateTime = (iso) => {
@@ -1356,7 +1354,7 @@ export default function HistoriqueRecoltes() {
       label: "Actions",
       render: (row) => (
         <div className="row-actions">
-          <button onClick={() => setSelectedFiche(row)}>Voir</button>
+          <button onClick={() => handleVoirFiche(row)}>Voir</button>
           {row.statut === "soumis" && (
             <button
               className="btn-primary btn-sm"
@@ -1410,7 +1408,7 @@ export default function HistoriqueRecoltes() {
         const nonValide = row.statut !== "valide";
         return (
           <div className="row-actions">
-            <button onClick={() => setSelectedFiche(row)}>Voir</button>
+            <button onClick={() => handleVoirFiche(row)}>Voir</button>
             {nonValide && (
               <button
                 className="btn-ghost btn-sm"
@@ -1566,7 +1564,7 @@ export default function HistoriqueRecoltes() {
           borderRadius: 8, padding: "10px 16px", marginBottom: 12,
           fontSize: 13, display: "flex", alignItems: "center", gap: 10,
         }}>
-          <span style={{ fontSize: 16 }}>✏️</span>
+          <span style={{ display: "flex", alignItems: "center" }}><Pencil size={16} /></span>
           <span>
             Modification de la fiche du <strong>{fiche.date || "..."}</strong> — les donnees sont pre-remplies.
           </span>
@@ -1730,7 +1728,7 @@ export default function HistoriqueRecoltes() {
         )}
       </section>
 
-      {/* Dombrement des regimes */}
+      {/* Denombrement des regimes */}
       <section
         className={`fiche-section ${
           fieldErrors.denombrement || fieldErrors.recolteurs ? "section-error" : ""
@@ -1738,118 +1736,135 @@ export default function HistoriqueRecoltes() {
       >
         <div className="section-row">
           <h3>Denombrement des regimes par secteur et par recolteur</h3>
-          <button className="btn-ghost" onClick={addRecolteur}>Ajouter recolteur</button>
         </div>
 
         {fieldErrors.denombrement && (
           <div className="field-error">{fieldErrors.denombrement}</div>
         )}
 
-        <div className="filters-bar">
-          <label>
-            Secteurs
-            <select
-              value={secteurChoiceValue}
-              onChange={(e) => {
-                const v = e.target.value;
-                if (v === "__all__") {
-                  setActiveSecteurCodes(secteurList.map((s) => s.code));
-                } else {
-                  setActiveSecteurCodes([v]);
-                }
-              }}
-            >
-              <option value="__all__">Tous les secteurs</option>
-              {secteurList.map((s) => (
-                <option key={s.code} value={s.code}>
-                  {s.code} - {s.nom}
-                </option>
-              ))}
-            </select>
-          </label>
+        {/* Formulaire d'insertion : reste visible en haut pendant le scroll de la liste ci-dessous */}
+        <div className="recolteur-insert-form">
+          <div className="filters-bar">
+            <label>
+              Secteurs affiches
+              <select
+                value={secteurChoiceValue}
+                onChange={(e) => {
+                  const v = e.target.value;
+                  if (v === "__all__") {
+                    setActiveSecteurCodes(secteurList.map((s) => s.code));
+                  } else {
+                    setActiveSecteurCodes([v]);
+                  }
+                }}
+              >
+                <option value="__all__">Tous les secteurs</option>
+                {secteurList.map((s) => (
+                  <option key={s.code} value={s.code}>
+                    {s.code} - {s.nom}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
+
+          <div className="recolteur-insert-grid">
+            <label>
+              Recolteur
+              <select
+                className={`fiche-input ${draftErrors.nom ? "input-error" : ""}`}
+                value={draft.nom}
+                onChange={(e) => handleDraftNom(e.target.value)}
+              >
+                <option value="">-- Choisir un recolteur --</option>
+                {(recolteursList || []).map((x) => (
+                  <option key={x.id} value={x.nom}>
+                    {x.numero_telephone ? `${x.numero_telephone} — ` : ""}{x.nom}
+                  </option>
+                ))}
+              </select>
+              {draftErrors.nom && <span className="field-error">{draftErrors.nom}</span>}
+            </label>
+
+            <label>
+              Type de regime
+              <select
+                className="fiche-input"
+                value={draft.regimeKey}
+                onChange={(e) => handleDraftRegime(e.target.value)}
+              >
+                {regimeTypes.map((reg) => (
+                  <option key={reg.key} value={reg.key}>
+                    {REGIME_LABEL_FULL[reg.key]} ({fiche.bareme[reg.key]} FCFA/rég.)
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
+
+          <div className="recolteur-secteur-grid">
+            {visibleSecteurs.map((s) => (
+              <label key={s.code} className="recolteur-secteur-cell">
+                {s.label}
+                <input
+                  type="number"
+                  min="0"
+                  className="fiche-input fiche-input-sm"
+                  value={draft.secteurs[s.code] ?? ""}
+                  onChange={(e) => handleDraftSecteurQty(s.code, e.target.value)}
+                />
+              </label>
+            ))}
+          </div>
+          {draftErrors.secteurs && <div className="field-error">{draftErrors.secteurs}</div>}
+
+          <div className="recolteur-insert-actions">
+            <button className="btn btn-primary" onClick={insertOrUpdateLigne}>
+              {editingLigneId ? "Mettre à jour" : "Insérer"}
+            </button>
+            {editingLigneId && (
+              <button className="btn-ghost" onClick={cancelEditLigne}>Annuler</button>
+            )}
+          </div>
         </div>
 
-        <div className="fiche-table-wrapper">
-          <table className="fiche-table">
-            <thead>
-              <tr>
-                <th>Recolteur</th>
-                <th>Regimes</th>
-                {visibleSecteurs.map((s) => (
-                  <th key={s.code}>{s.label}</th>
-                ))}
-                <th>TOTAL</th>
-                <th>PRIX (FCFA)</th>
-              </tr>
-            </thead>
-            <tbody>
-              {fiche.recolteurs.map((r) =>
-                regimeTypes.map((reg, idx) => (
-                  <tr key={`${r.id}-${reg.key}`}>
-                    {idx === 0 && (
-                      <td rowSpan={regimeTypes.length} className="row-head">
-                        <div className="row-head-content">
-                          <select
-                            className={`fiche-input ${fieldErrors.recolteurs?.[r.id] ? "input-error" : ""}`}
-                            value={r.nom}
-                            onChange={(e) => handleRecolteurName(r.id, e.target.value)}
-                          >
-                            <option value="">-- Choisir un recolteur --</option>
-                            {(recolteursList || []).map((x) => (
-                              <option key={x.id} value={x.nom}>
-                                {x.numero_telephone ? `${x.numero_telephone} — ` : ""}{x.nom}
-                              </option>
-                            ))}
-                          </select>
-                          {fieldErrors.recolteurs?.[r.id] && (
-                            <span className="field-error">{fieldErrors.recolteurs[r.id]}</span>
-                          )}
-                          <button className="btn-danger btn-mini" onClick={() => removeRecolteur(r.id)}>
-                            Supprimer
-                          </button>
-                        </div>
-                        <div className="row-head-summary">
-                          <small>
-                            Grds: {calcTotal(r.regimes.grands)} | Moy: {calcTotal(r.regimes.moyens)} | Ptits: {calcTotal(r.regimes.petits)} | Total:{" "}
-                            {calcTotal(r.regimes.grands) + calcTotal(r.regimes.moyens) + calcTotal(r.regimes.petits)} | Prix:{" "}
-                            {calcTotal(r.regimes.grands) * (Number(fiche.bareme.grands) || 0) +
-                              calcTotal(r.regimes.moyens) * (Number(fiche.bareme.moyens) || 0) +
-                              calcTotal(r.regimes.petits) * (Number(fiche.bareme.petits) || 0)}
-                          </small>
-                        </div>
-                      </td>
-                    )}
-                    <td className="regime-label">
-                      {reg.label} ({fiche.bareme[reg.key]})
-                    </td>
-                    {visibleSecteurs.map((s) => (
-                      <td key={s.code}>
-                        <input
-                          type="number"
-                          min="0"
-                          className="fiche-input fiche-input-sm"
-                          value={r.regimes[reg.key][s.code]}
-                          onChange={(e) =>
-                            handleRegimeChange(r.id, reg.key, s.code, Math.max(0, Number(e.target.value)) || "")
-                          }
-                        />
-                      </td>
-                    ))}
-                    <td className="total-cell">
-                      {calcTotal(r.regimes[reg.key])}
-                    </td>
-                    {/* PRIX calcule automatiquement: total regimes * bareme */}
-                    <td className="total-cell">
-                      {calcTotal(r.regimes[reg.key]) * (Number(fiche.bareme[reg.key]) || 0)}
-                    </td>
-                  </tr>
-                ))
-              )}
-              {fiche.recolteurs.length === 0 && (
-                <tr><td colSpan={visibleSecteurs.length + 4}>Aucun recolteur ajoute</td></tr>
-              )}
-            </tbody>
-          </table>
+        {/* Liste des recolteurs deja inseres pour cette fiche */}
+        <div className="fiche-dialog-lines recolteur-list">
+          {fiche.recolteurs.length === 0 && (
+            <p className="recolteur-list-empty">Aucun recolteur ajoute pour l'instant — utilise le formulaire ci-dessus.</p>
+          )}
+          {fiche.recolteurs.map((entry) => {
+            const total = calcTotal(entry.secteurs || {});
+            const prix = total * (Number(fiche.bareme[entry.regimeKey]) || 0);
+            const detailsSecteurs = secteurList.filter((s) => Number(entry.secteurs?.[s.code]) > 0);
+            return (
+              <div
+                key={entry.id}
+                className={`fiche-line-card${editingLigneId === entry.id ? " editing" : ""}`}
+              >
+                <div className="fiche-line-head">
+                  <strong>{entry.nom}</strong>
+                  <span>{REGIME_LABEL_FULL[entry.regimeKey]}</span>
+                  <span>Total : {total}</span>
+                  <span>Prix : {prix} FCFA</span>
+                  <div style={{ display: "flex", gap: 6 }}>
+                    <button className="btn-ghost btn-mini" onClick={() => startEditLigne(entry)}>Modifier</button>
+                    <button className="btn-danger btn-mini" onClick={() => removeLigne(entry.id)}>Supprimer</button>
+                  </div>
+                </div>
+                {fieldErrors.recolteurs?.[entry.id] && (
+                  <div className="field-error">{fieldErrors.recolteurs[entry.id]}</div>
+                )}
+                <div className="fiche-line-details">
+                  {detailsSecteurs.map((s) => (
+                    <span key={s.code} className="fiche-chip">
+                      {s.label} : {entry.secteurs[s.code]}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            );
+          })}
         </div>
       </section>
 

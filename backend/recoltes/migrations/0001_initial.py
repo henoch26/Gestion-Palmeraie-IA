@@ -9,7 +9,7 @@ class Migration(migrations.Migration):
     initial = True
 
     dependencies = [
-        ('recolteurs', '0001_initial'),
+        ('recolteurs', '0007_rename_recolteur_to_personnel'),
         ('secteurs', '0001_initial'),
     ]
 
@@ -37,7 +37,7 @@ class Migration(migrations.Migration):
                 ('regime_type', models.CharField(choices=[('grands', 'Grands'), ('moyens', 'Moyens'), ('petits', 'Petits')], max_length=10)),
                 ('paye_amount', models.DecimalField(decimal_places=2, default=0, max_digits=12)),
                 ('fiche', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name='lignes', to='recoltes.ficherecolte')),
-                ('recolteur', models.ForeignKey(blank=True, null=True, on_delete=django.db.models.deletion.SET_NULL, related_name='lignes_recolte', to='recolteurs.recolteur')),
+                ('recolteur', models.ForeignKey(blank=True, null=True, on_delete=django.db.models.deletion.SET_NULL, related_name='lignes_recolte', to='recolteurs.personnel')),
             ],
         ),
         migrations.CreateModel(

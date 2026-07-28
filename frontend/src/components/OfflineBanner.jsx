@@ -8,6 +8,7 @@
  * donc la sync fonctionne même si la session sessionStorage a expiré.
  */
 import { useEffect, useRef, useState } from "react";
+import { AlertTriangle, XCircle, RefreshCw } from "lucide-react";
 import { getPendingCount, syncPending } from "../utils/offline.js";
 
 export default function OfflineBanner() {
@@ -79,8 +80,8 @@ export default function OfflineBanner() {
       fontSize: 14, fontWeight: 500,
     }}>
       <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-        <span style={{ fontSize: 18 }}>
-          {isOffline ? "⚠️" : syncErrors > 0 ? "❌" : "🔄"}
+        <span style={{ display: "flex", alignItems: "center" }}>
+          {isOffline ? <AlertTriangle size={18} /> : syncErrors > 0 ? <XCircle size={18} /> : <RefreshCw size={18} />}
         </span>
 
         {isOffline ? (

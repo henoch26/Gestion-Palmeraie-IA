@@ -94,13 +94,20 @@ _TRAVAUX_LABELS = {
 class FicheTravauxViewSet(viewsets.ModelViewSet):
     serializer_class = FicheTravauxSerializer
 
+    def get_serializer_class(self):
+        if self.action == "list":
+            from .serializers import FicheTravauxListSerializer
+            return FicheTravauxListSerializer
+        return FicheTravauxSerializer
+
     def get_queryset(self):
         from django.db.models import Q
         from agents.models import SuperviseurGeneral
 
-        qs = FicheTravaux.objects.prefetch_related(
-            "secteurs_couverts", "consommables", "repartitions"
-        ).order_by("-id")
+        qs = FicheTravaux.objects.prefetch_related("secteurs_couverts")
+        if self.action != "list":
+            qs = qs.prefetch_related("consommables", "repartitions")
+        qs = qs.order_by("-id")
         if not _is_admin(self.request.user):
             q = Q(created_by=self.request.user)
             try:
@@ -328,7 +335,7 @@ class FicheTravauxViewSet(viewsets.ModelViewSet):
         total_cons = 0
         total_taches_sum = 0
 
-        fiches = self.get_queryset().filter(created_at__year=year)
+        fiches = self.get_queryset().filter(date_debut__year=year)
         for fiche in fiches:
             secteurs_codes = ", ".join(fiche.secteurs_couverts.values_list("code", flat=True))
             for c in fiche.consommables.all():

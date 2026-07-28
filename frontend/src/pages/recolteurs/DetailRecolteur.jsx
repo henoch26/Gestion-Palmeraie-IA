@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
+import { AlertTriangle } from "lucide-react";
 import ChartCard from "../../components/ChartCard.jsx";
 import ChartDialog from "../../components/ChartDialog.jsx";
 import LogoLoader from "../../components/LogoLoader.jsx";
@@ -56,7 +57,8 @@ export default function DetailRecolteur() {
 
   const years = useMemo(() => {
     const y = new Date().getFullYear();
-    return Array.from({ length: 10 }, (_, i) => y - i);
+    const DATA_START_YEAR = 2014; // premiere annee couverte par l'historique de la palmeraie
+    return Array.from({ length: y - DATA_START_YEAR + 1 }, (_, i) => y - i);
   }, []);
 
   const truncateToCurrentMonth = (arr, targetYear) => {
@@ -431,7 +433,7 @@ export default function DetailRecolteur() {
           background: "#fff", border: "1px solid #f5c6cb",
           borderRadius: 12, marginTop: 16,
         }}>
-          <p style={{ fontSize: 40, margin: "0 0 12px" }}>⚠️</p>
+          <div style={{ display: "flex", justifyContent: "center", margin: "0 0 12px" }}><AlertTriangle size={40} color="#c62828" /></div>
           <h3 style={{ color: "#c62828", margin: "0 0 8px" }}>Récolteur introuvable</h3>
           <p style={{ color: "#888", fontSize: 14, margin: "0 0 20px" }}>
             Ce récolteur n&apos;existe plus ou a été supprimé de la base de données.

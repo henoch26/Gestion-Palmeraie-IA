@@ -74,10 +74,12 @@ class UserProfile(models.Model):
     ROLE_ADMIN = "admin"
     ROLE_SUPERVISEUR = "superviseur"
     ROLE_SUPERVISEUR_ADJOINT = "superviseur_adjoint"
+    ROLE_ENCADREUR_TECHNIQUE = "encadreur_technique"
     ROLE_CHOICES = [
         (ROLE_ADMIN, "Administrateur"),
         (ROLE_SUPERVISEUR, "Superviseur"),
         (ROLE_SUPERVISEUR_ADJOINT, "Superviseur adjoint"),
+        (ROLE_ENCADREUR_TECHNIQUE, "Encadreur Technique"),
     ]
 
     user = models.OneToOneField(
@@ -102,7 +104,6 @@ class UserProfile(models.Model):
 
     @property
     def is_superviseur(self):
-        # True pour superviseur ET superviseur_adjoint (tous deux non-admin)
         return self.role in (self.ROLE_SUPERVISEUR, self.ROLE_SUPERVISEUR_ADJOINT)
 
     @property
@@ -112,6 +113,10 @@ class UserProfile(models.Model):
     @property
     def is_superviseur_adjoint(self):
         return self.role == self.ROLE_SUPERVISEUR_ADJOINT
+
+    @property
+    def is_encadreur_technique(self):
+        return self.role == self.ROLE_ENCADREUR_TECHNIQUE
 
 
 class PasswordResetToken(models.Model):

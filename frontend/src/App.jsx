@@ -1,10 +1,10 @@
 /**
- * App.jsx — Point d'entree de l'application React. Definit l'arborescence des routes.
+ * App.jsx â€” Point d'entree de l'application React. Definit l'arborescence des routes.
  *
  * Trois niveaux de protection :
- *   ProtectedRoute   — Redirige vers /login si non authentifie
- *   AdminRoute       — Redirige si l'utilisateur n'est pas admin
- *   RequirePermission— Redirige si le superviseur n'a pas le droit specifie
+ *   ProtectedRoute   â€” Redirige vers /login si non authentifie
+ *   AdminRoute       â€” Redirige si l'utilisateur n'est pas admin
+ *   RequirePermissionâ€” Redirige si le superviseur n'a pas le droit specifie
  *
  * Verification de sante du serveur :
  *   Au demarrage, un appel GET /api/health/ verifie que le backend est joignable.
@@ -38,6 +38,12 @@ import MonProfilPage from "./pages/auth/MonProfilPage.jsx";
 import ProtectedRoute from "./routes/ProtectedRoute.jsx";
 import AdminRoute from "./routes/AdminRoute.jsx";
 import RequirePermission from "./routes/RequirePermission.jsx";
+import RequireIARole from "./routes/RequireIARole.jsx";
+import DashboardIA from "./pages/ia/DashboardIA.jsx";
+import ListePredictions from "./pages/ia/ListePredictions.jsx";
+import ListeAnomalies from "./pages/ia/ListeAnomalies.jsx";
+import ListeModeles from "./pages/ia/ListeModeles.jsx";
+import PrescriptionsIA from "./pages/ia/PrescriptionsIA.jsx";
 import { apiGet } from "./api/axios.js";
 import { useToast } from "./context/ToastContext.jsx";
 
@@ -113,25 +119,32 @@ export default function App(){
             <Route element={<MainLayout />}>
               <Route index element={<Navigate to="/dashboard" replace />}/>
               <Route path="/dashboard" element={<DashboardPage />}/>
-              {/* Accessible aux deux roles — l'API filtre selon le role */}
+              {/* Accessible aux deux roles â€” l'API filtre selon le role */}
               <Route path="/profil" element={<MonProfilPage />}/>
               <Route path="/recoltes" element={<HistoriqueRecoltes />}/>
               <Route path="/travaux" element={<HistoriqueTravaux />}/>
               <Route path="/agents" element={<ListeAgents />}/>
               <Route path="/superviseurs/:id" element={<DetailSuperviseur />}/>
 
-              {/* Ressources — accessibles a l'admin ou aux superviseurs avec permission */}
+              {/* Ressources â€” accessibles a l'admin ou aux superviseurs avec permission */}
               <Route path="/secteurs" element={<ListeSecteurs />}/>
               <Route path="/secteurs/:id" element={<DetailSecteur />}/>
               <Route path="/recolteurs" element={<ListeRecolteurs />}/>
               <Route path="/recolteurs/:id" element={<DetailRecolteur />}/>
               <Route path="/materiels" element={<ListeMateriels />}/>
 
-              {/* Page audit superviseur (accessible à tous les connectés) */}
+              {/* Page audit superviseur (accessible Ã  tous les connectÃ©s) */}
               <Route path="/mon-audit" element={<MonAudit />}/>
 
-              {/* Clients — admin ou superviseur avec droit gerer_clients */}
+              {/* Clients â€” admin ou superviseur avec droit gerer_clients */}
               <Route path="/clients" element={<RequirePermission code="gerer_clients"><GestionClients /></RequirePermission>} />
+
+              {/* Module IA â€” accessible Ã  tous les utilisateurs connectÃ©s */}
+              <Route path="/ia" element={<RequireIARole><DashboardIA /></RequireIARole>}/>
+              <Route path="/ia/predictions" element={<RequireIARole><ListePredictions /></RequireIARole>}/>
+              <Route path="/ia/anomalies" element={<RequireIARole><ListeAnomalies /></RequireIARole>}/>
+              <Route path="/ia/prescriptions" element={<RequireIARole><PrescriptionsIA /></RequireIARole>}/>
+              <Route path="/ia/modeles" element={<RequireIARole><ListeModeles /></RequireIARole>}/>
 
               {/* Routes admin uniquement */}
               <Route element={<AdminRoute />}>

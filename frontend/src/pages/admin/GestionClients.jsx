@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { Building2, Pencil, X } from "lucide-react";
 import ConfirmDialog from "../../components/ConfirmDialog.jsx";
 import { useToast } from "../../context/ToastContext.jsx";
 import { useAuth } from "../../context/AuthContext.jsx";
@@ -50,7 +51,7 @@ function ClientDialog({ open, onClose, onSubmit, initial }) {
               display: "flex", alignItems: "center", justifyContent: "center",
               fontSize: 20, flexShrink: 0,
             }}>
-              {isEdit ? "✏️" : "🏢"}
+              {isEdit ? <Pencil size={20} /> : <Building2 size={20} />}
             </div>
             <div>
               <div style={{ fontWeight: 700, fontSize: 15 }}>
@@ -66,7 +67,8 @@ function ClientDialog({ open, onClose, onSubmit, initial }) {
             background: "rgba(255,255,255,0.2)", border: "none",
             borderRadius: 6, color: "#fff", padding: "4px 10px",
             cursor: "pointer", fontSize: 12, fontWeight: 600,
-          }}>✕</button>
+            display: "flex", alignItems: "center",
+          }}><X size={14} /></button>
         </div>
 
         {/* Corps */}

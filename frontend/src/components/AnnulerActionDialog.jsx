@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { X } from "lucide-react";
 import { revertAction } from "../services/actionLogService.js";
 import { useToast } from "../context/ToastContext.jsx";
 
@@ -79,8 +80,9 @@ export default function AnnulerActionDialog({ row, onClose, onReverted }) {
               background: "rgba(255,255,255,0.15)", border: "none",
               borderRadius: 6, color: "#fff", padding: "4px 10px",
               cursor: "pointer", fontSize: 12, fontWeight: 600,
+              display: "flex", alignItems: "center",
             }}
-          >✕</button>
+          ><X size={14} /></button>
         </div>
 
         {/* Corps */}

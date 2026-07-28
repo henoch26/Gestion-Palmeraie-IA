@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import { Image, X } from "lucide-react";
 import ChartCard from "./ChartCard.jsx";
 import useBodyScrollLock from "../utils/useBodyScrollLock.js";
 
@@ -82,7 +83,8 @@ export default function ChartDialog({ open, onClose, chart, subtitle }) {
     link.click();
   };
 
-  const handleExportExcel = () => exportToExcel(chart.title, chart.data);
+  const hasData = Boolean(chart?.data?.labels?.length && chart?.data?.datasets?.length);
+  const handleExportExcel = () => { if (hasData) exportToExcel(chart.title, chart.data); };
 
   return (
     <div className="dialog-backdrop">
@@ -104,9 +106,10 @@ export default function ChartDialog({ open, onClose, chart, subtitle }) {
           <div style={{ display: "flex", gap: 8 }}>
             <button
               onClick={handleExportExcel}
+              disabled={!hasData}
               style={{
                 padding: "6px 14px", borderRadius: 4, border: "1px solid #217346",
-                background: "#217346", color: "#fff", cursor: "pointer", fontSize: 13, fontWeight: 600,
+                background: hasData ? "#217346" : "#bbb", color: "#fff", cursor: hasData ? "pointer" : "not-allowed", fontSize: 13, fontWeight: 600,
                 display: "flex", alignItems: "center", gap: 6,
               }}
             >
@@ -122,16 +125,17 @@ export default function ChartDialog({ open, onClose, chart, subtitle }) {
                 display: "flex", alignItems: "center", gap: 6,
               }}
             >
-              🖼 Image PNG
+              <Image size={14} /> Image PNG
             </button>
             <button
               onClick={onClose}
               style={{
                 padding: "6px 14px", borderRadius: 4, border: "1px solid #ccc",
                 background: "#fff", color: "#333", cursor: "pointer", fontSize: 13,
+                display: "flex", alignItems: "center", gap: 6,
               }}
             >
-              ✕ Fermer
+              <X size={14} /> Fermer
             </button>
           </div>
         </div>

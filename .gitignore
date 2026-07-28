@@ -21,4 +21,6 @@ frontend/dist/
 frontend/.env.production
 frontend/.env.local
 frontend/.env.*.local
-
+# Artefacts generes
+backend/media/
+backend/reports/

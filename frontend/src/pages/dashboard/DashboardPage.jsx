@@ -14,6 +14,7 @@
  */
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
+import { AlertTriangle } from "lucide-react";
 import ChartCard from "../../components/ChartCard.jsx";
 import ChartDialog from "../../components/ChartDialog.jsx";
 import FicheJourDialog from "../../components/FicheJourDialog.jsx";
@@ -41,9 +42,11 @@ const COLORS = {
 
 const PALETTE = ["#2e7d32","#1565c0","#e65100","#f9a825","#ad1457","#00695c","#4e342e","#546e7a","#7b1fa2","#0097a7"];
 
+const DATA_START_YEAR = 2014; // premiere annee couverte par l'historique de la palmeraie
+
 const yearOptions = (() => {
   const y = new Date().getFullYear();
-  return Array.from({ length: 10 }, (_, i) => y - i);
+  return Array.from({ length: y - DATA_START_YEAR + 1 }, (_, i) => y - i);
 })();
 
 // ── Composant carte KPI ───────────────────────────────────────────────────────
@@ -76,7 +79,7 @@ function AlerteBandeau({ notifications }) {
       background: "#fff3e0", border: "1px solid #ffb74d", borderRadius: 6,
       padding: "10px 16px", marginBottom: 16, display: "flex", flexWrap: "wrap", gap: 8,
     }}>
-      <span style={{ fontWeight: 700, color: "#e65100", marginRight: 4 }}>⚠ Alertes :</span>
+      <span style={{ fontWeight: 700, color: "#e65100", marginRight: 4, display: "inline-flex", alignItems: "center", gap: 4 }}><AlertTriangle size={14} /> Alertes :</span>
       {alertes.slice(0, 4).map((a) => (
         <span key={a.id} style={{ background: "#ffe0b2", borderRadius: 4, padding: "2px 10px", fontSize: 13, color: "#bf360c" }}>
           {a.message}

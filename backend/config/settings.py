@@ -45,6 +45,7 @@ INSTALLED_APPS = [
     'rest_framework.authtoken',
     'corsheaders',
     'django_crontab',
+    'drf_spectacular',
     'dashboard',
     'recoltes',
     'secteurs',
@@ -52,7 +53,9 @@ INSTALLED_APPS = [
     'recolteurs',
     'travaux',
     'materiels',
+    'plantations',
     'agents',
+    'ia_module',
 ]
 
 MIDDLEWARE = [
@@ -92,11 +95,14 @@ WSGI_APPLICATION = 'config.wsgi.application'
 DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.postgresql',
-        'NAME': os.environ.get('DB_NAME', 'gestion_palmeraie'),
+        'NAME': os.environ.get('DB_NAME', 'gestion_palmeraie_ia'),
         'USER': os.environ.get('DB_USER', 'palmeraie_user'),
         'PASSWORD': os.environ.get('DB_PASSWORD', 'Palmeraie26@04#'),
         'HOST': os.environ.get('DB_HOST', 'localhost'),
         'PORT': os.environ.get('DB_PORT', '5433'),
+        'TEST': {
+            'NAME': 'test_gestion_palmeraie',
+        },
     }
 }
 
@@ -161,10 +167,24 @@ if not DEBUG:
         o.strip() for o in os.environ.get('CSRF_TRUSTED_ORIGINS', '').split(',') if o.strip()
     ]
 
-# Tâches périodiques (django-crontab) — exécuter check_alerts tous les jours à 06h00
+# Tâches périodiques (django-crontab)
 CRONJOBS = [
     ('0 6 * * *', 'django.core.management.call_command', ['check_alerts']),
+    ('30 6 * * *', 'django.core.management.call_command', ['detecter_anomalies_auto']),
+    ('0 7 * * *', 'django.core.management.call_command', ['fetch_meteo']),
+    ('0 8 * * 1', 'django.core.management.call_command', ['entrainer_modeles']),
 ]
+
+# Swagger / OpenAPI
+REST_FRAMEWORK_SPECTACULAR = {
+    "TITLE": "API Gestion Palmeraie",
+    "DESCRIPTION": "API complète du système de gestion de palmeraie avec module IA.",
+    "VERSION": "1.0.0",
+}
+
+# Météo Open-Meteo (aucune clé nécessaire — API gratuite)
+METEO_LAT = float(os.environ.get("METEO_LAT", "5.35"))
+METEO_LON = float(os.environ.get("METEO_LON", "-4.00"))
 
 # Email — utilise Gmail SMTP si EMAIL_HOST_USER est défini, sinon affiche dans la console
 _email_user = os.environ.get("EMAIL_HOST_USER", "")
@@ -188,6 +208,7 @@ REST_FRAMEWORK = {
     "DEFAULT_PERMISSION_CLASSES": [
         "rest_framework.permissions.IsAuthenticated",
     ],
+    "DEFAULT_SCHEMA_CLASS": "drf_spectacular.openapi.AutoSchema",
 }
 
 # Default primary key field type

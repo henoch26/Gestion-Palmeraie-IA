@@ -41,7 +41,7 @@ import SuccessDialog from "../../components/SuccessDialog.jsx";
 import { ficheTravauxInitial } from "../../data/ficheTravauxData.js";
 import { listSecteurs } from "../../services/secteurService.js";
 import { listSuperviseurs } from "../../services/superviseurService.js";
-import { createFicheTravaux, deleteFicheTravaux, listFichesTravaux, patchFicheTravaux } from "../../services/travauxService.js";
+import { createFicheTravaux, deleteFicheTravaux, getFicheTravaux, listFichesTravaux, patchFicheTravaux } from "../../services/travauxService.js";
 import { useAuth } from "../../context/AuthContext.jsx";
 import { getToken } from "../../services/authService.js";
 import { sanitizeDecimal, sanitizeInt } from "../../utils/number.js";
@@ -141,36 +141,52 @@ export default function HistoriqueTravaux() {
     setTab("saisie");
   };
 
-  const handleLoadForEdit = (row) => {
-    const parts = (row.periode_travaux || "").split(" - ");
+  const handleVoirFiche = async (row) => {
+    try {
+      const full = await getFicheTravaux(row.id);
+      setSelectedFiche(full);
+    } catch (err) {
+      pushToast({ type: "error", title: "Travaux", message: err.message });
+    }
+  };
+
+  const handleLoadForEdit = async (row) => {
+    let full;
+    try {
+      full = await getFicheTravaux(row.id);
+    } catch (err) {
+      pushToast({ type: "error", title: "Travaux", message: err.message });
+      return;
+    }
+    const parts = (full.periode_travaux || "").split(" - ");
     const debut = parts[0]?.trim() || "";
     const fin   = parts[1]?.trim() || "";
     setFiche({
-      superviseurTravaux:   row.superviseur_travaux || "",
-      natureTravaux:        row.nature_travaux || "",
-      superficieCouverteHa: row.superficie_couverte_ha != null ? String(row.superficie_couverte_ha) : "",
-      secteursCouverts:     (row.secteurs_couverts || []).map(Number),
+      superviseurTravaux:   full.superviseur_travaux || "",
+      natureTravaux:        full.nature_travaux || "",
+      superficieCouverteHa: full.superficie_couverte_ha != null ? String(full.superficie_couverte_ha) : "",
+      secteursCouverts:     (full.secteurs_couverts || []).map(Number),
       periodeTravauxDebut:  debut,
       periodeTravauxFin:    fin,
-      nbPersonnes:          row.nb_personnes != null ? String(row.nb_personnes) : "",
-      salaireTotal:         row.salaire_total != null ? String(row.salaire_total) : "",
-      consommables: (row.consommables || []).map((c) => ({
+      nbPersonnes:          full.nb_personnes != null ? String(full.nb_personnes) : "",
+      salaireTotal:         full.salaire_total != null ? String(full.salaire_total) : "",
+      consommables: (full.consommables || []).map((c) => ({
         id: uid("C"),
         designation:  c.designation || "",
         quantite:     c.quantite != null ? String(c.quantite) : "",
         unite:        c.unite || "",
         prix_unitaire: c.prix_unitaire != null ? String(c.prix_unitaire) : "",
       })),
-      repartitions: (row.repartitions || []).map((r) => ({
+      repartitions: (full.repartitions || []).map((r) => ({
         id: uid("R"),
         nom_prenom:   r.nom_prenom || "",
         nature_taches: r.nature_taches || "",
         quantite:     r.quantite != null ? String(r.quantite) : "",
         prix_unitaire: r.prix_unitaire != null ? String(r.prix_unitaire) : "",
       })),
-      observations: row.observations || "",
+      observations: full.observations || "",
     });
-    setEditingId(row.id);
+    setEditingId(full.id);
     setSecteurToAdd("");
     setFieldErrors({});
     setTab("saisie");
@@ -469,7 +485,7 @@ export default function HistoriqueTravaux() {
         const canValidate = isCreateur;
         return (
           <div className="row-actions">
-            <button onClick={() => setSelectedFiche(row)}>Voir</button>
+            <button onClick={() => handleVoirFiche(row)}>Voir</button>
             {s === "brouillon" && isCreateur && (
               <>
                 <button

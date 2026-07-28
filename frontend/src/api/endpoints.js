@@ -1,8 +1,8 @@
-// Endpoints API (DRF)
+﻿// Endpoints API (DRF)
 export const endpoints = {
   secteurs: "/secteurs/",
   personnel: "/personnel/",
-  recolteurs: "/personnel/",   // alias de rétrocompatibilité
+  recolteurs: "/personnel/",
   recoltes: "/recoltes/",
   travaux: "/travaux/",
   materiels: "/materiels/",
@@ -12,4 +12,14 @@ export const endpoints = {
   audit: "/audit/",
   agents: "/agents/",
   droits: "/droits/",
+  iaModeles: "/ia/modeles/",
+  iaPredictions: "/ia/predictions/",
+  iaAnomalies: "/ia/anomalies/",
+  iaMeteo: "/ia/meteo/",
+  iaSynthese: "/ia/synthese/",
+  iaSimulation: "/ia/simulation/",
+  iaPrescriptions: "/ia/prescriptions/",
+  iaEntrainer: "/ia/entrainer/",
+  iaPredire: "/ia/predire-rendement/",
+  iaDetecter: "/ia/detecter-anomalie/",
 };

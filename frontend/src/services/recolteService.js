@@ -3,6 +3,7 @@ import { endpoints } from "../api/endpoints.js";
 
 // CRUD fiches de recolte
 export const listFiches = () => apiGet(endpoints.recoltes);
+export const getFiche = (id) => apiGet(`${endpoints.recoltes}${id}/`);
 export const createFiche = (payload) => apiPost(endpoints.recoltes, payload);
 export const updateFiche = (id, payload) => apiPut(`${endpoints.recoltes}${id}/`, payload);
 export const deleteFiche = (id) => apiDelete(`${endpoints.recoltes}${id}/`);

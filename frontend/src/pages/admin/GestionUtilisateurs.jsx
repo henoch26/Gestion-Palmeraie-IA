@@ -14,6 +14,7 @@
  */
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { X, Mail } from "lucide-react";
 import { apiDelete, apiGet, apiPatch, apiPost } from "../../api/axios.js";
 import { endpoints } from "../../api/endpoints.js";
 import { useToast } from "../../context/ToastContext.jsx";
@@ -53,7 +54,7 @@ return (
       <div className="modal" style={{ maxWidth: 480 }} onClick={(e) => e.stopPropagation()}>
         <div className="modal-header">
           <h2>Compte cree — Partager les identifiants</h2>
-          <button className="btn-ghost btn-mini" onClick={onClose}>✕</button>
+          <button className="btn-ghost btn-mini" onClick={onClose}><X size={14} /></button>
         </div>
         <div className="modal-body">
           <p style={{ marginBottom: 12, color: "var(--color-muted)", fontSize: "0.9rem" }}>
@@ -374,7 +375,7 @@ export default function GestionUtilisateurs() {
           <div className="modal" onClick={(e) => e.stopPropagation()}>
             <div className="modal-header">
               <h2>{editingUser ? `Modifier ${editingUser.username}` : "Nouvel utilisateur"}</h2>
-              <button className="btn-ghost btn-mini" onClick={closeForm}>✕</button>
+              <button className="btn-ghost btn-mini" onClick={closeForm}><X size={14} /></button>
             </div>
 
             <form onSubmit={handleSubmit} autoComplete="off">
@@ -547,8 +548,8 @@ export default function GestionUtilisateurs() {
                         onChange={handleChange}
                         placeholder="ex: superviseur@example.com"
                       />
-                      <small className="mfield-hint">
-                        &#9993; {!editingUser ? "Requis — permet la reinitialisation du mot de passe" : "Utilise pour envoyer les identifiants par email"}
+                      <small className="mfield-hint" style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
+                        <Mail size={12} /> {!editingUser ? "Requis — permet la reinitialisation du mot de passe" : "Utilise pour envoyer les identifiants par email"}
                       </small>
                       {errors.email && <span className="mfield-error">{errors.email}</span>}
                     </div>
@@ -648,7 +649,7 @@ export default function GestionUtilisateurs() {
           <div className="modal" style={{ maxWidth: 420 }} onClick={(e) => e.stopPropagation()}>
             <div className="modal-header">
               <h2>Supprimer le compte</h2>
-              <button className="btn-ghost btn-mini" onClick={() => setDeleteConfirm(null)}>✕</button>
+              <button className="btn-ghost btn-mini" onClick={() => setDeleteConfirm(null)}><X size={14} /></button>
             </div>
             <div className="modal-body">
               <p style={{ fontSize: 14, color: "#555", marginBottom: 8 }}>

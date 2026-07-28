@@ -21,10 +21,6 @@ export const regimeTypes = [
   { key: "petits", label: "Ptits" },
 ];
 
-// Helper: cree un objet { GP_1: "", GP_2: "", ... }
-const emptyBySecteur = () =>
-  Object.fromEntries(secteurCodes.map((s) => [s.code, ""]));
-
 // Etat initial de la fiche
 export const ficheRecolteInitial = {
   date: "",
@@ -40,18 +36,9 @@ export const ficheRecolteInitial = {
     moyens: 50,
     petits: 25,
   },
-  // Recolteurs + denombrement des regimes
-  recolteurs: [
-    {
-      id: "REC-001",
-      nom: "A. Konan",
-      regimes: {
-        grands: { ...emptyBySecteur() },
-        moyens: { ...emptyBySecteur() },
-        petits: { ...emptyBySecteur() },
-      },
-    },
-  ],
+  // Lignes de denombrement inserees une a une (un recolteur + un type de regime
+  // + les quantites par secteur ou il a recolte ce type de regime ce jour-la)
+  recolteurs: [],
   // Depenses
   depenses: {
     nourriture: "",

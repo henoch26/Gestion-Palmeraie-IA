@@ -16,6 +16,7 @@
  */
 import { jsPDF } from "jspdf";
 import autoTable from "jspdf-autotable";
+import { CheckCircle2, Download, Phone } from "lucide-react";
 import useBodyScrollLock from "../utils/useBodyScrollLock.js";
 
 const fmt = (n) =>
@@ -281,11 +282,7 @@ export default function FicheDialog({ open, onClose, fiche }) {
                 fontWeight: 600, cursor: "pointer",
               }}
             >
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
-                <polyline points="7 10 12 15 17 10"/>
-                <line x1="12" y1="15" x2="12" y2="3"/>
-              </svg>
+              <Download size={14} strokeWidth={2.2} />
               PDF
             </button>
             <button className="dialog-close" style={{ position: "static" }} onClick={onClose}>Fermer</button>
@@ -299,7 +296,7 @@ export default function FicheDialog({ open, onClose, fiche }) {
             borderRadius: 8, padding: "8px 14px", marginBottom: 14,
             fontSize: 13, color: "#2e7d32", display: "flex", alignItems: "center", gap: 8,
           }}>
-            <span style={{ fontSize: 16 }}>✓</span>
+            <CheckCircle2 size={16} style={{ flexShrink: 0 }} />
             <span>
               Validée{fiche.validated_by_display ? <> par <strong>{fiche.validated_by_display}</strong></> : ""}
               {fiche.validated_at ? <> le <strong>{fmtDateTime(fiche.validated_at)}</strong></> : ""}
@@ -313,8 +310,8 @@ export default function FicheDialog({ open, onClose, fiche }) {
           <div style={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: 6 }}>
             <strong>Superviseur :</strong> {fiche.superviseur_general || "-"}
             {fiche.superviseur_general_telephone && (
-              <span style={{ marginLeft: 4, fontSize: 12, fontWeight: 700, background: "#e3f2fd", color: "#1565c0", padding: "2px 8px", borderRadius: 10, border: "1px solid #90caf9" }}>
-                📞 {fiche.superviseur_general_telephone}
+              <span style={{ marginLeft: 4, fontSize: 12, fontWeight: 700, background: "#e3f2fd", color: "#1565c0", padding: "2px 8px", borderRadius: 10, border: "1px solid #90caf9", display: "inline-flex", alignItems: "center", gap: 4 }}>
+                <Phone size={11} /> {fiche.superviseur_general_telephone}
               </span>
             )}
           </div>

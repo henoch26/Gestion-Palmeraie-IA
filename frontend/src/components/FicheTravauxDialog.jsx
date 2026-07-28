@@ -16,6 +16,7 @@
  */
 import { jsPDF } from "jspdf";
 import autoTable from "jspdf-autotable";
+import { CheckCircle2, Phone } from "lucide-react";
 import useBodyScrollLock from "../utils/useBodyScrollLock.js";
 
 const fmt = (n) =>
@@ -271,7 +272,7 @@ export default function FicheTravauxDialog({ open, onClose, fiche }) {
             borderRadius: 8, padding: "8px 14px", marginBottom: 14,
             display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: "#2e7d32",
           }}>
-            <span style={{ fontSize: 16 }}>✓</span>
+            <CheckCircle2 size={16} style={{ flexShrink: 0 }} />
             <span>
               Validée{fiche.validated_by_display
                 ? <> par <strong>{fiche.validated_by_display}</strong></>
@@ -303,8 +304,9 @@ export default function FicheTravauxDialog({ open, onClose, fiche }) {
                 background: "#e3f2fd", color: "#1565c0",
                 padding: "2px 8px", borderRadius: 10,
                 border: "1px solid #90caf9",
+                display: "inline-flex", alignItems: "center", gap: 4,
               }}>
-                📞 {fiche.superviseur_travaux_telephone}
+                <Phone size={11} /> {fiche.superviseur_travaux_telephone}
               </span>
             )}
           </div>

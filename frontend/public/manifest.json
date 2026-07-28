@@ -1,0 +1,37 @@
+{
+  "name": "Gestion Palmeraie IA",
+  "short_name": "Palmeraie",
+  "description": "Système de gestion de palmeraie avec module Intelligence Artificielle",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#166534",
+  "orientation": "portrait-primary",
+  "lang": "fr",
+  "icons": [
+    {
+      "src": "/vite.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ],
+  "categories": ["productivity", "business"],
+  "shortcuts": [
+    {
+      "name": "Dashboard",
+      "url": "/dashboard",
+      "description": "Tableau de bord"
+    },
+    {
+      "name": "Récoltes",
+      "url": "/recoltes",
+      "description": "Gérer les récoltes"
+    },
+    {
+      "name": "IA",
+      "url": "/ia",
+      "description": "Module Intelligence Artificielle"
+    }
+  ]
+}

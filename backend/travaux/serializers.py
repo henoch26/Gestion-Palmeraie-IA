@@ -196,3 +196,26 @@ class FicheTravauxSerializer(serializers.ModelSerializer):
                 RepartitionTache.objects.create(fiche=instance, **r)
 
         return instance
+
+
+class FicheTravauxListSerializer(FicheTravauxSerializer):
+    """Serializer allege pour l'action `list` de FicheTravauxViewSet.
+
+    Omet consommables/repartitions (collections imbriquees couteuses a
+    serialiser) et les champs derives non utilises par l'historique
+    (total_cout, created_by_username, validated_by_display,
+    superviseur_travaux_telephone, type_travaux_display,
+    statut_avancement_display) — ce dernier declenche une requete
+    SuperviseurGeneral par ligne. Le detail complet reste disponible via
+    GET /travaux/:id/ (FicheTravauxSerializer, action retrieve).
+    """
+
+    class Meta(FicheTravauxSerializer.Meta):
+        fields = [
+            "id", "superviseur_travaux", "nature_travaux", "nature_travaux_display",
+            "periode_travaux", "date_debut", "date_fin", "superficie_couverte_ha",
+            "nb_personnes", "secteurs_couverts", "secteurs_couverts_codes",
+            "statut", "statut_display", "statut_avancement", "observations",
+            "type_travaux", "created_by", "created_at", "validated_by",
+            "validated_at", "cout_total_calcule",
+        ]

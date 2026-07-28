@@ -169,15 +169,15 @@ def summary_view(request):
     travaux_qs = travaux_qs.distinct()
 
     total_consommables = float(
-        ConsommableTravaux.objects.filter(fiche__in=travaux_qs, fiche__created_at__year=selected_year)
+        ConsommableTravaux.objects.filter(fiche__in=travaux_qs, fiche__date_debut__year=selected_year)
         .aggregate(total=Sum(cost_expr))["total"] or 0
     )
     total_taches = float(
-        RepartitionTache.objects.filter(fiche__in=travaux_qs, fiche__created_at__year=selected_year)
+        RepartitionTache.objects.filter(fiche__in=travaux_qs, fiche__date_debut__year=selected_year)
         .aggregate(total=Sum(cost_expr))["total"] or 0
     )
     total_salaires_travaux = float(
-        travaux_qs.filter(created_at__year=selected_year)
+        travaux_qs.filter(date_debut__year=selected_year)
         .aggregate(total=Sum("salaire_total"))["total"] or 0
     )
     cout_total_travaux = total_consommables + total_taches + total_salaires_travaux
@@ -212,7 +212,7 @@ def summary_view(request):
     rendement_kg_ha = round(total_kg / superficie_totale, 2) if superficie_totale else 0
 
     fiches_recolte_count = fiches_recolte_qs.filter(date__year=selected_year).count()
-    fiches_travaux_count = travaux_qs.filter(created_at__year=selected_year).count()
+    fiches_travaux_count = travaux_qs.filter(date_debut__year=selected_year).count()
 
     # Répartition production par type de régime
     def repartition_par_regime(target_year):
@@ -395,18 +395,18 @@ def summary_view(request):
             base[m] = base.get(m, 0.0) + float(r["total"] or 0)
         # Travaux : consommables + tâches + salaires travailleurs
         for r in (ConsommableTravaux.objects
-                  .filter(fiche__in=trav_qs, fiche__created_at__year=year)
-                  .values("fiche__created_at__month").annotate(total=Sum(cost_expr))):
-            m = r["fiche__created_at__month"]
+                  .filter(fiche__in=trav_qs, fiche__date_debut__year=year)
+                  .values("fiche__date_debut__month").annotate(total=Sum(cost_expr))):
+            m = r["fiche__date_debut__month"]
             base[m] = base.get(m, 0.0) + float(r["total"] or 0)
         for r in (RepartitionTache.objects
-                  .filter(fiche__in=trav_qs, fiche__created_at__year=year)
-                  .values("fiche__created_at__month").annotate(total=Sum(cost_expr))):
-            m = r["fiche__created_at__month"]
+                  .filter(fiche__in=trav_qs, fiche__date_debut__year=year)
+                  .values("fiche__date_debut__month").annotate(total=Sum(cost_expr))):
+            m = r["fiche__date_debut__month"]
             base[m] = base.get(m, 0.0) + float(r["total"] or 0)
-        for r in (trav_qs.filter(created_at__year=year)
-                  .values("created_at__month").annotate(total=Sum("salaire_total"))):
-            m = r["created_at__month"]
+        for r in (trav_qs.filter(date_debut__year=year)
+                  .values("date_debut__month").annotate(total=Sum("salaire_total"))):
+            m = r["date_debut__month"]
             base[m] = base.get(m, 0.0) + float(r["total"] or 0)
         return [base.get(m, 0.0) for m in range(1, 13)]
 
@@ -416,7 +416,7 @@ def summary_view(request):
     dep_last6 = []
     for yy, mm, _ in last6:
         fiches_m = fiches_recolte_qs.filter(date__year=yy, date__month=mm)
-        trav_m   = travaux_qs.filter(created_at__year=yy, created_at__month=mm)
+        trav_m   = travaux_qs.filter(date_debut__year=yy, date_debut__month=mm)
         row = fiches_m.aggregate(
             nourriture=Coalesce(Sum("depense_nourriture"), zero_money),
             transport=Coalesce(Sum("depense_transport"), zero_money),
@@ -529,12 +529,12 @@ def summary_view(request):
         cons = ConsommableTravaux.objects.filter(fiche__in=trav_qs)
         taches = RepartitionTache.objects.filter(fiche__in=trav_qs)
         if year_filter is not None:
-            cons = cons.filter(fiche__created_at__year=year_filter)
-            taches = taches.filter(fiche__created_at__year=year_filter)
+            cons = cons.filter(fiche__date_debut__year=year_filter)
+            taches = taches.filter(fiche__date_debut__year=year_filter)
         if month_pairs is not None:
             q = Q()
             for yy, mm, _ in month_pairs:
-                q |= Q(fiche__created_at__year=yy, fiche__created_at__month=mm)
+                q |= Q(fiche__date_debut__year=yy, fiche__date_debut__month=mm)
             cons = cons.filter(q)
             taches = taches.filter(q)
 
@@ -562,17 +562,17 @@ def summary_view(request):
 
     def cout_travaux_by_month(target_year):
         cost_map = {}
-        for r in ConsommableTravaux.objects.filter(fiche__in=travaux_qs, fiche__created_at__year=target_year)\
-                .values("fiche__created_at__month").annotate(total=Sum(cost_expr)):
-            mm = r["fiche__created_at__month"]
+        for r in ConsommableTravaux.objects.filter(fiche__in=travaux_qs, fiche__date_debut__year=target_year)\
+                .values("fiche__date_debut__month").annotate(total=Sum(cost_expr)):
+            mm = r["fiche__date_debut__month"]
             cost_map[mm] = cost_map.get(mm, 0) + float(r["total"] or 0)
-        for r in RepartitionTache.objects.filter(fiche__in=travaux_qs, fiche__created_at__year=target_year)\
-                .values("fiche__created_at__month").annotate(total=Sum(cost_expr)):
-            mm = r["fiche__created_at__month"]
+        for r in RepartitionTache.objects.filter(fiche__in=travaux_qs, fiche__date_debut__year=target_year)\
+                .values("fiche__date_debut__month").annotate(total=Sum(cost_expr)):
+            mm = r["fiche__date_debut__month"]
             cost_map[mm] = cost_map.get(mm, 0) + float(r["total"] or 0)
-        for r in travaux_qs.filter(created_at__year=target_year)\
-                .values("created_at__month").annotate(total=Sum("salaire_total")):
-            mm = r["created_at__month"]
+        for r in travaux_qs.filter(date_debut__year=target_year)\
+                .values("date_debut__month").annotate(total=Sum("salaire_total")):
+            mm = r["date_debut__month"]
             cost_map[mm] = cost_map.get(mm, 0) + float(r["total"] or 0)
         return [round(cost_map.get(mm, 0.0), 2) for mm in range(1, 13)]
 
@@ -582,12 +582,12 @@ def summary_view(request):
     cout_travaux_last6 = []
     for yy, mm, _ in last6:
         tc = float(ConsommableTravaux.objects.filter(fiche__in=travaux_qs,
-                    fiche__created_at__year=yy, fiche__created_at__month=mm)
+                    fiche__date_debut__year=yy, fiche__date_debut__month=mm)
                     .aggregate(t=Sum(cost_expr))["t"] or 0)
         tt = float(RepartitionTache.objects.filter(fiche__in=travaux_qs,
-                    fiche__created_at__year=yy, fiche__created_at__month=mm)
+                    fiche__date_debut__year=yy, fiche__date_debut__month=mm)
                     .aggregate(t=Sum(cost_expr))["t"] or 0)
-        ts = float(travaux_qs.filter(created_at__year=yy, created_at__month=mm)
+        ts = float(travaux_qs.filter(date_debut__year=yy, date_debut__month=mm)
                     .aggregate(t=Sum("salaire_total"))["t"] or 0)
         cout_travaux_last6.append(round(tc + tt + ts, 2))
 

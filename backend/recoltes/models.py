@@ -23,7 +23,6 @@ class FicheRecolte(models.Model):
         ("soumis", "Soumis"),
         ("valide", "Validé"),
     ]
-
     created_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.SET_NULL,
